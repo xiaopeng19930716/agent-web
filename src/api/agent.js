@@ -141,13 +141,13 @@ export async function scanImportAgent(agentId) {
   }
 }
 
-// 通过预置供应商 vendor + baseURL + API Key 拉取模型列表（后端按 vendor 分派）
-export async function fetchModelsByVendor({ vendor, baseUrl, apiKey }) {
+// 通过供应商 vendor + baseURL + API Key 拉取模型列表（预置按 vendor 分派，自定义按 type 范式）
+export async function fetchModelsByVendor({ vendor, baseUrl, apiKey, type }) {
   try {
     const resp = await fetch('/api/models/fetch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ vendor, baseUrl, apiKey }),
+      body: JSON.stringify({ vendor, baseUrl, apiKey, type }),
     })
     const data = await resp.json().catch(() => ({}))
     if (!resp.ok) return { models: [], error: data.error || `请求失败: ${resp.status}` }

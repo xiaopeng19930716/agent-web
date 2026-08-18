@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "dev:all": "concurrently -n web,api -c cyan,green \"npm run dev\" \"npm run server\"",
     "dev": "vite",
     "server": "node server/index.js",
-    "dev:all": "concurrently -n web,api -c cyan,green \"npm run dev\" \"npm run server\"",
     "build": "vite build",
     "preview": "vite preview"
   },

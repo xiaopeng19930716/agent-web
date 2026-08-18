@@ -31,9 +31,6 @@ const TYPE_DEFAULT_BASEURL = {
   anthropic: '',
   native: '',
 }
-// 预置供应商 key 集合（仅这些可获取模型列表）
-const PRESET_VENDOR_KEYS = new Set(PRESET_VENDORS.map((v) => v.key))
-
 // 取预置供应商在指定类型下的预设 Base URL（无则返回空串）
 function presetBaseUrl(vendor, type) {
   if (!vendor || !vendor.baseUrls) return ''
@@ -58,10 +55,12 @@ const allVendors = computed(() => [
 const activeKey = ref(PRESET_VENDORS[0].key)
 const activeVendor = computed(() => allVendors.value.find((v) => v.key === activeKey.value) || allVendors.value[0])
 const isNew = computed(() => activeKey.value === '__new__')
-const isCustomVendor = computed(() => !PRESET_VENDOR_KEYS.has(activeKey.value))
+
+// 预置供应商 key 集合（用于唯一性校验：自定义供应商 Key 不得与预置冲突）
+const PRESET_VENDOR_KEYS = new Set(PRESET_VENDORS.map((v) => v.key))
 
 const emptyRow = () => ({ name: '', id: '', maxTokens: '' })
-const form = reactive({ name: '', website: '', baseUrl: '', apiKey: '', platform: 'openai', modelRows: [emptyRow()] })
+const form = reactive({ name: '', website: '', vendorKey: '', baseUrl: '', apiKey: '', platform: 'openai', modelRows: [emptyRow()] })
 
 const modelsOfVendor = computed(() => settings.models.filter((m) => m.vendorKey === activeKey.value))
 
@@ -70,7 +69,7 @@ const isConfigured = (key) => settings.configuredVendors.includes(key)
 function selectVendor(key) {
   activeKey.value = key
   if (key === '__new__') {
-    Object.assign(form, { name: '', website: '', baseUrl: '', apiKey: '', platform: 'openai', modelRows: [emptyRow()] })
+    Object.assign(form, { name: '', website: '', vendorKey: '', baseUrl: '', apiKey: '', platform: 'openai', modelRows: [emptyRow()] })
   } else {
     const vendor = allVendors.value.find((v) => v.key === key)
     const platform = vendor && vendor.baseUrls ? firstNonEmptyType(vendor.baseUrls) : 'openai'
@@ -78,6 +77,7 @@ function selectVendor(key) {
     Object.assign(form, {
       name: vendor ? vendor.name : '',
       website: (vendor && vendor.website) || '',
+      vendorKey: vendor ? vendor.key : '',
       baseUrl: vendor ? presetBaseUrl(vendor, platform) : '',
       apiKey: '',
       platform,
@@ -111,9 +111,18 @@ function toNumber(v) {
   return Number.isFinite(n) && n > 0 ? n : undefined
 }
 function save() {
-  let key = isNew.value ? '__new__' : activeVendor.value.key
+  let key = isNew.value ? form.vendorKey.trim() : activeVendor.value.key
   if (!form.name.trim()) {
     message.error('供应商名称不能为空')
+    return
+  }
+  if (!key) {
+    message.error('供应商 Key 不能为空')
+    return
+  }
+  // 仅新增时做唯一性校验：不得与预置供应商或其他自定义供应商重复
+  if (isNew.value && (PRESET_VENDOR_KEYS.has(key) || settings.customVendors.some((v) => v.key === key))) {
+    message.error('供应商 Key 已存在，请更换')
     return
   }
   const rows = form.modelRows.filter((r) => r.id.trim())
@@ -130,7 +139,6 @@ function save() {
     seen.add(r.id.trim())
   }
   if (isNew.value) {
-    key = 'custom-' + Date.now()
     settings.customVendors.push({ key, name: form.name.trim(), website: form.website.trim(), baseUrl: form.baseUrl.trim() })
   } else if (key === 'custom') {
     settings.customVendors = settings.customVendors.filter((v) => v.key !== 'custom')
@@ -175,11 +183,6 @@ function resetDefaults() {
 }
 
 async function fetchModels() {
-  // 仅预置供应商可获取模型列表
-  if (!PRESET_VENDOR_KEYS.has(activeKey.value)) {
-    message.error('自定义供应商请手动添加模型')
-    return
-  }
   // 仅 OpenAI 兼容类型支持自动获取模型列表；Anthropic / 原生类型暂不支持
   if (form.platform !== 'openai') {
     message.error('该类型暂不支持自动获取')
@@ -196,7 +199,7 @@ async function fetchModels() {
   fetchLoading.value = true
   try {
     const { models, error: err } = await fetchModelsByVendor({
-      vendor: activeKey.value,
+      vendor: isNew.value ? form.vendorKey.trim() : activeKey.value,
       baseUrl: form.baseUrl.trim(),
       apiKey: form.apiKey.trim(),
       type: form.platform,
@@ -209,8 +212,10 @@ async function fetchModels() {
       message.error('该接口未返回任何模型')
       return
     }
-    form.modelRows = models.map((m) => ({ name: m.name || m.id, id: m.id, maxTokens: '' }))
-    message.success(`已获取 ${models.length} 个模型`)
+    // 模型较多时只填入前 10 个，其余可手动添加
+    const MAX_FETCH_ROWS = 10
+    form.modelRows = models.slice(0, MAX_FETCH_ROWS).map((m) => ({ name: m.name || m.id, id: m.id, maxTokens: '' }))
+    message.success(models.length > MAX_FETCH_ROWS ? `已获取 ${models.length} 个模型，仅填入前 ${MAX_FETCH_ROWS} 个` : `已获取 ${models.length} 个模型`)
   } finally {
     fetchLoading.value = false
   }
@@ -290,6 +295,16 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
           </label>
         </div>
         <label class="block">
+          <span class="block text-xs font-semibold text-gray-700 mb-1">供应商 Key <span class="text-red-500">*</span></span>
+          <a-input
+            v-model:value="form.vendorKey"
+            placeholder="如：my-llm-service（唯一标识，用于获取模型列表）"
+            size="middle"
+            :disabled="!isNew"
+          />
+          <span class="text-[11px] text-gray-400 mt-1 block">{{ isNew ? '自定义供应商需手动填写 Key，保存后不可修改' : '预置 / 已保存供应商的 Key 不可修改' }}</span>
+        </label>
+        <label class="block">
           <span class="block text-xs font-semibold text-gray-700 mb-1">Base URL</span>
           <a-input-group compact size="middle">
             <a-select
@@ -320,7 +335,6 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
           <div class="flex items-center justify-between mb-2">
             <span class="text-xs font-semibold text-gray-700">模型（名称 / ID / Max Tokens，可添加多组）</span>
             <button
-              v-if="!isCustomVendor"
               type="button"
               :disabled="fetchLoading"
               class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium border border-brand/40 text-brand rounded-lg hover:bg-brand/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
@@ -329,7 +343,6 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
               <RefreshCw :size="14" :class="{ 'animate-spin': fetchLoading }" />
               {{ fetchLoading ? '获取中…' : '获取模型列表' }}
             </button>
-            <span v-else class="text-[11px] text-gray-400">自定义供应商请手动添加模型</span>
           </div>
           <div class="space-y-2">
             <div v-for="(row, i) in form.modelRows" :key="i" class="flex items-center gap-2">

@@ -80,8 +80,130 @@ app.post('/api/projects', (req, res) => {
 })
 
 app.delete('/api/projects/:id', (req, res) => {
-  const ok = projects.delete(req.params.id)
-  if (ok) saveProjects()
+  const id = req.params.id
+  const ok = projects.delete(id)
+  if (ok) {
+    saveProjects()
+    // 级联删除该项目下的所有会话
+    let removed = false
+    for (const [sid, s] of [...sessions.entries()]) {
+      if ((s.projectId || NO_PROJECT_KEY) === id) {
+        sessions.delete(sid)
+        removed = true
+      }
+    }
+    if (removed) saveSessions()
+  }
+  res.json({ ok })
+})
+
+// 按目录名在常见根目录下查找真实绝对路径（浏览器选择文件夹拿不到绝对路径的场景）
+app.get('/api/locate-dir', (req, res) => {
+  const name = (req.query.name || '').toString().trim()
+  if (!name) {
+    res.status(400).json({ error: '缺少 name 参数' })
+    return
+  }
+  const roots = [
+    join(os.homedir()),
+    'C:/',
+    'D:/',
+    'E:/',
+  ].filter((r) => {
+    try {
+      return fs.existsSync(r) && fs.statSync(r).isDirectory()
+    } catch {
+      return false
+    }
+  })
+
+  const results = []
+  const MAX_DEPTH = 4
+  const MAX_RESULTS = 10
+  const walk = (dir, depth) => {
+    if (results.length >= MAX_RESULTS || depth > MAX_DEPTH) return
+    let entries
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue
+      const full = join(dir, e.name)
+      if (e.name === name) {
+        results.push(full)
+        if (results.length >= MAX_RESULTS) return
+        continue
+      }
+      // 跳过常见的无关节点（隐藏、node_modules、.git 等）以提速
+      if (e.name.startsWith('.') || e.name === 'node_modules') continue
+      walk(full, depth + 1)
+    }
+  }
+  for (const r of roots) {
+    if (results.length >= MAX_RESULTS) break
+    walk(r, 1)
+  }
+  res.json({ results })
+})
+
+// ===== 会话存储（按项目归属，持久化对话消息）=====
+const NO_PROJECT_KEY = '__none__'
+const SESSIONS_FILE = join(__dirname, 'sessions.json')
+/** @type {Map<string, {id:string, projectId:string, title:string, messages:any[], createdAt:number, updatedAt:number}>} */
+const sessions = new Map()
+
+function loadSessions() {
+  try {
+    if (fs.existsSync(SESSIONS_FILE)) {
+      const arr = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf-8'))
+      for (const s of arr) sessions.set(s.id, s)
+    }
+  } catch (e) {
+    console.error('加载 sessions.json 失败:', e)
+  }
+}
+function saveSessions() {
+  fs.writeFileSync(SESSIONS_FILE, JSON.stringify([...sessions.values()], null, 2))
+}
+loadSessions()
+
+app.get('/api/sessions', (_req, res) => {
+  let list = [...sessions.values()]
+  list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+  res.json(list)
+})
+app.post('/api/sessions', (req, res) => {
+  const { projectId, title } = req.body || {}
+  const id = 's_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+  const now = Date.now()
+  const session = {
+    id,
+    projectId: projectId || '__none__',
+    title: title || '新对话',
+    messages: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+  sessions.set(id, session)
+  saveSessions()
+  res.json(session)
+})
+app.put('/api/sessions/:id', (req, res) => {
+  const s = sessions.get(req.params.id)
+  if (!s) return res.status(404).json({ error: '会话不存在' })
+  const { title, messages } = req.body || {}
+  if (typeof title === 'string') s.title = title
+  if (Array.isArray(messages)) s.messages = messages
+  s.updatedAt = Date.now()
+  sessions.set(s.id, s)
+  saveSessions()
+  res.json(s)
+})
+app.delete('/api/sessions/:id', (req, res) => {
+  const ok = sessions.delete(req.params.id)
+  if (ok) saveSessions()
   res.json({ ok })
 })
 
@@ -139,7 +261,13 @@ function grep(root, pattern, dir, results, depth) {
   }
 }
 
-function buildTools(root) {
+function buildTools(root, permission = 'full') {
+  // permission: 'full' 可写；'read-only' / 'none' 禁止写入文件
+  const canWrite = permission === 'full'
+  const writeGuard = async (fn) => {
+    if (!canWrite) return '当前权限为只读，无法写入或编辑文件。如需修改文件，请在对话框中将权限级别切换为「完全访问」。'
+    return fn()
+  }
   return [
     tool(
       async ({ dir = '.' }) => {
@@ -175,12 +303,14 @@ function buildTools(root) {
     tool(
       async ({ filePath, content }) => {
         const full = safeResolve(root, filePath)
-        await fsp.writeFile(full, content, 'utf-8')
-        return '已写入: ' + filePath
+        return writeGuard(async () => {
+          await fsp.writeFile(full, content, 'utf-8')
+          return '已写入: ' + filePath
+        })
       },
       {
         name: 'writeFile',
-        description: '创建或覆盖写入文件。注意：会覆盖已有内容，谨慎使用。',
+        description: '创建或覆盖写入文件（需「完全访问」权限，仅 full 模式可用）。',
         schema: {
           type: 'object',
           properties: {
@@ -194,15 +324,17 @@ function buildTools(root) {
     tool(
       async ({ filePath, oldStr, newStr }) => {
         const full = safeResolve(root, filePath)
-        const text = await fsp.readFile(full, 'utf-8')
-        if (!text.includes(oldStr)) return '错误：未在文件中找到 oldStr。'
-        const updated = text.replace(oldStr, newStr)
-        await fsp.writeFile(full, updated, 'utf-8')
-        return '已修改: ' + filePath
+        return writeGuard(async () => {
+          const text = await fsp.readFile(full, 'utf-8')
+          if (!text.includes(oldStr)) return '错误：未在文件中找到 oldStr。'
+          const updated = text.replace(oldStr, newStr)
+          await fsp.writeFile(full, updated, 'utf-8')
+          return '已修改: ' + filePath
+        })
       },
       {
         name: 'editFile',
-        description: '在文件中把 oldStr 替换为 newStr（首次出现）。用于局部修改代码。',
+        description: '在文件中把 oldStr 替换为 newStr（首次出现），用于局部修改代码（需「完全访问」权限）。',
         schema: {
           type: 'object',
           properties: {
@@ -261,8 +393,8 @@ function buildChatModel(cfg) {
 }
 
 // ===== Agent loop：流式输出 + 工具调用，限制在项目目录内 =====
-async function runAgent(model, history, projectRoot, res) {
-  const tools = buildTools(projectRoot)
+async function runAgent(model, history, projectRoot, res, permission = 'full') {
+  const tools = buildTools(projectRoot, permission)
   const toolMap = Object.fromEntries(tools.map((t) => [t.name, t]))
   const modelWithTools = model.bindTools(tools)
   const messages = [new SystemMessage(SYSTEM_PROMPT), ...history]
@@ -328,7 +460,9 @@ app.post('/api/chat', async (req, res) => {
     return
   }
 
-  const { messages, projectId } = req.body
+  const { messages, projectId, permission, effort } = req.body
+  // 权限级别：read-only(只读) / full(完全访问) / none(不允许)；默认 full
+  const perm = permission === 'read-only' || permission === 'none' ? permission : 'full'
 
   // 若关联项目，校验后端已知的项目根目录
   let projectRoot = null
@@ -341,6 +475,14 @@ app.post('/api/chat', async (req, res) => {
     projectRoot = p.path
   }
 
+  // 思考强度（effort）映射到系统提示片段
+  const effortHint =
+    effort === 'low'
+      ? '\n\n思考强度：低。优先给出最直接的解决方案，避免展开过多探索。'
+      : effort === 'high'
+        ? '\n\n思考强度：高。请充分推理，权衡多种方案并验证边界情况后再作答。'
+        : ''
+
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
@@ -349,10 +491,10 @@ app.post('/api/chat', async (req, res) => {
   try {
     const chatModel = buildChatModel(cfg)
     if (projectRoot) {
-      await runAgent(chatModel, (messages || []).map(toLangchainMessage), projectRoot, res)
+      await runAgent(chatModel, (messages || []).map(toLangchainMessage), projectRoot, res, perm)
     } else {
       // 无项目：直接流式补全
-      const msgs = [new SystemMessage(SYSTEM_PROMPT), ...(messages || []).map(toLangchainMessage)]
+      const msgs = [new SystemMessage(SYSTEM_PROMPT + effortHint), ...(messages || []).map(toLangchainMessage)]
       const stream = await chatModel.stream(msgs)
       for await (const chunk of stream) {
         if (typeof chunk.content === 'string' && chunk.content) {
@@ -450,10 +592,14 @@ const PRESET_VENDOR_LIST_RULES = {
 
 app.post('/api/models/fetch', async (req, res) => {
   const { vendor, baseUrl, apiKey, type: reqType } = req.body || {}
-  const rule = PRESET_VENDOR_LIST_RULES[vendor]
+  let rule = PRESET_VENDOR_LIST_RULES[vendor]
   if (!rule) {
-    res.status(400).json({ error: '该供应商不支持获取模型列表（仅预置供应商可获取）' })
-    return
+    // 自定义供应商：按所选调用范式处理（当前仅支持 OpenAI 兼容范式）
+    if (reqType !== 'openai') {
+      res.status(400).json({ error: '自定义供应商暂仅支持 OpenAI 兼容类型自动获取模型列表' })
+      return
+    }
+    rule = { type: 'openai', listPaths: { openai: '/models', anthropic: '', native: '' } }
   }
   // 按请求类型取对应 list 路径（缺省回退到供应商默认类型）
   const effectiveType = MODEL_LIST_TYPE[reqType] ? reqType : rule.type
