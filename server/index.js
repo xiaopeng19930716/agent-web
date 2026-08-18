@@ -387,6 +387,128 @@ app.get('/api/models', (_req, res) => {
   })
 })
 
+// ===== 拉取模型列表（仅预置供应商）=====
+// 3 种类型（openai 兼容 / anthropic 兼容 / 原生）是通用调用范式；
+// 每个预置供应商自带 list 规则（路径/鉴权/解析），并映射到上述类型之一。
+const MODEL_LIST_TYPE = {
+  // OpenAI 兼容范式：GET {baseUrl}/models，Bearer 鉴权，解析 json.data[].id
+  openai: {
+    buildUrl: (baseUrl, rule) => String(baseUrl).replace(/\/+$/, '') + ((rule.listPaths && rule.listPaths.openai) || '/models'),
+    headers: (apiKey) => ({ Authorization: 'Bearer ' + apiKey }),
+    parse: (json) => {
+      const list = Array.isArray(json.data) ? json.data : []
+      return list
+        .map((m) =>
+          typeof m === 'string'
+            ? { id: m, name: m }
+            : { id: m && m.id, name: (m && (m.name || m.id)) || m.id }
+        )
+        .filter((m) => m.id)
+    },
+    needKey: true,
+    needBaseUrl: true,
+  },
+  // Anthropic 兼容范式：官方无 list 接口，回退内置常量
+  anthropic: {
+    buildUrl: () => null,
+    headers: () => ({}),
+    parse: () => [
+      { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
+      { id: 'claude-3-5-haiku-latest', name: 'Claude 3.5 Haiku' },
+      { id: 'claude-3-opus-latest', name: 'Claude 3 Opus' },
+      { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet' },
+      { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku' },
+    ],
+    needKey: false,
+    needBaseUrl: false,
+  },
+  // 原生接口范式：按供应商规则自定义解析
+  native: {
+    buildUrl: (baseUrl, rule) => String(baseUrl).replace(/\/+$/, '') + ((rule.listPaths && rule.listPaths.native) || ''),
+    headers: (apiKey) => (apiKey ? { Authorization: 'Bearer ' + apiKey } : {}),
+    parse: (json, rule) => {
+      const field = rule.parseField || 'data'
+      const list = Array.isArray(json[field]) ? json[field] : []
+      return list
+        .map((m) => (typeof m === 'string' ? { id: m, name: m } : { id: m && m.id, name: (m && (m.name || m.id)) || m.id }))
+        .filter((m) => m.id)
+    },
+    needKey: false,
+    needBaseUrl: true,
+  },
+}
+
+// 预置供应商各自的 list 规则（按 vendor key 索引）
+// listPaths 按类型决定模型列表路径（openai 兼容→/models；其余类型前端已拦截，后端仅作兜底）
+const PRESET_VENDOR_LIST_RULES = {
+  'bailian-coding': { type: 'openai', listPaths: { openai: '/models', anthropic: '', native: '' } },
+  'bailian-token': { type: 'openai', listPaths: { openai: '/models', anthropic: '', native: '' } },
+  deepseek: { type: 'openai', listPaths: { openai: '/models', anthropic: '', native: '' } },
+  zhipu: { type: 'openai', listPaths: { openai: '/models', anthropic: '', native: '/v1/models' } },
+  tencent: { type: 'openai', listPaths: { openai: '/models', anthropic: '', native: '' } },
+}
+
+app.post('/api/models/fetch', async (req, res) => {
+  const { vendor, baseUrl, apiKey, type: reqType } = req.body || {}
+  const rule = PRESET_VENDOR_LIST_RULES[vendor]
+  if (!rule) {
+    res.status(400).json({ error: '该供应商不支持获取模型列表（仅预置供应商可获取）' })
+    return
+  }
+  // 按请求类型取对应 list 路径（缺省回退到供应商默认类型）
+  const effectiveType = MODEL_LIST_TYPE[reqType] ? reqType : rule.type
+  if (reqType && reqType !== rule.type) {
+    // 非默认类型：若该类型无对应 list 路径则直接提示（前端通常已拦截）
+    const path = rule.listPaths && rule.listPaths[reqType]
+    if (!path) {
+      res.status(400).json({ error: '该类型暂不支持自动获取' })
+      return
+    }
+  }
+  const type = MODEL_LIST_TYPE[effectiveType]
+  const key = apiKey ? String(apiKey).trim() : ''
+  const url = type.buildUrl(baseUrl ? String(baseUrl).trim() : '', rule)
+  if (type.needKey && !key) {
+    res.status(400).json({ error: 'API Key 不能为空' })
+    return
+  }
+  if (type.needBaseUrl && !url) {
+    res.status(400).json({ error: 'Base URL 不能为空' })
+    return
+  }
+  // anthropic 等无需请求，直接返回内置列表
+  if (!url) {
+    res.json({ models: type.parse({}, rule) })
+    return
+  }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 5000)
+  try {
+    const r = await fetch(url, {
+      method: 'GET',
+      headers: type.headers(key),
+      signal: controller.signal,
+    })
+    if (!r.ok) {
+      res.status(r.status < 500 ? 400 : 500).json({
+        error:
+          r.status === 401
+            ? '鉴权失败（401），请检查 API Key'
+            : r.status === 403
+              ? '无权限（403）'
+              : `服务端返回 HTTP ${r.status}`,
+      })
+      return
+    }
+    const json = await r.json().catch(() => ({}))
+    res.json({ models: type.parse(json, rule) })
+  } catch (e) {
+    res.status(400).json({ error: e.name === 'AbortError' ? '请求超时（5s）' : String(e.message || e) })
+  } finally {
+    clearTimeout(timer)
+  }
+})
+
 // ===== MCP Server 测试（仅连通性探测，不注入交互）=====
 app.post('/api/mcp/test', async (req, res) => {
   const { type, command, url } = req.body || {}
@@ -583,31 +705,117 @@ app.get('/api/skills', async (_req, res) => {
   }
 })
 
-// ===== 从其他 Agent 导入（只读扫描 + 技能复制）=====
+// ===== 从其他 Agent 导入（只读扫描 + 技能软链接）=====
 const home = os.homedir()
 const apData = process.env.APPDATA || join(home, 'AppData', 'Roaming')
 const projectRootDir = join(__dirname, '..')
 
-// 各 Agent 的 MCP 配置文件候选路径
-const MCP_SOURCE_CANDIDATES = [
-  { id: 'claude', label: 'Claude Code', paths: [join(home, '.claude.json'), join(home, '.claude', 'settings.json'), join(home, '.claude', 'mcp.json')] },
-  { id: 'claude-desktop', label: 'Claude Desktop', paths: [join(apData, 'Claude', 'claude_desktop_config.json'), join(home, '.config', 'Claude', 'claude_desktop_config.json')] },
-  { id: 'cursor', label: 'Cursor', paths: [join(home, '.cursor', 'mcp.json')] },
-  { id: 'windsurf', label: 'Windsurf', paths: [join(home, '.codeium', 'windsurf', 'mcp_config.json')] },
-  { id: 'codebuddy', label: 'CodeBuddy', paths: [join(home, '.codebuddy', 'mcp.json'), join(home, '.codebuddy', 'settings.json')] },
-  { id: 'roo', label: 'Roo Code', paths: [join(home, '.roo', 'mcp_settings.json')] },
-  { id: 'project', label: '当前项目 (.mcp.json)', paths: [join(projectRootDir, '.mcp.json')] },
+// 各 Agent 的默认配置（可被用户覆盖）。configFiles 为 MCP 配置文件候选，skillDirs 为 Skills 目录候选
+const IMPORT_SOURCE_DEFAULTS = [
+  {
+    id: 'claude',
+    label: 'Claude Code',
+    configFiles: [join(home, '.claude.json'), join(home, '.claude', 'settings.json'), join(home, '.claude', 'mcp.json')],
+    skillDirs: [join(home, '.claude', 'skills')],
+  },
+  {
+    id: 'claude-desktop',
+    label: 'Claude Desktop',
+    configFiles: [join(apData, 'Claude', 'claude_desktop_config.json'), join(home, '.config', 'Claude', 'claude_desktop_config.json')],
+    skillDirs: [],
+  },
+  {
+    id: 'cursor',
+    label: 'Cursor',
+    configFiles: [join(home, '.cursor', 'mcp.json')],
+    skillDirs: [join(home, '.cursor', 'skills')],
+  },
+  {
+    id: 'windsurf',
+    label: 'Windsurf',
+    configFiles: [join(home, '.codeium', 'windsurf', 'mcp_config.json')],
+    skillDirs: [],
+  },
+  {
+    id: 'codebuddy',
+    label: 'CodeBuddy',
+    configFiles: [join(home, '.codebuddy', 'mcp.json'), join(home, '.codebuddy', 'settings.json')],
+    skillDirs: [join(home, '.codebuddy', 'skills')],
+  },
+  {
+    id: 'roo',
+    label: 'Roo Code',
+    configFiles: [join(home, '.roo', 'mcp_settings.json')],
+    skillDirs: [],
+  },
+  {
+    id: 'opencode',
+    label: 'OpenCode',
+    configFiles: [join(home, '.config', 'opencode', 'mcp.json'), join(home, '.config', 'opencode', 'settings.json'), join(home, '.opencode', 'mcp.json'), join(home, '.opencode', 'settings.json')],
+    skillDirs: [join(home, '.config', 'opencode', 'skills'), join(home, '.opencode', 'skills')],
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    configFiles: [join(home, '.codex', 'config.json'), join(home, '.codex', 'settings.json')],
+    skillDirs: [join(home, '.codex', 'skills')],
+  },
+  {
+    id: 'hermes',
+    label: 'Hermes',
+    configFiles: [join(home, '.hermes', 'config.json'), join(home, '.hermes', 'settings.json'), join(home, '.config', 'hermes', 'config.json'), join(home, '.config', 'hermes', 'settings.json')],
+    skillDirs: [join(home, '.hermes', 'skills'), join(home, '.config', 'hermes', 'skills')],
+  },
+  {
+    id: 'gemini',
+    label: 'Gemini CLI',
+    configFiles: [],
+    skillDirs: [join(home, '.gemini', 'skills')],
+  },
+  {
+    id: 'agents',
+    label: '通用 (~/.agents/skills)',
+    configFiles: [],
+    skillDirs: [join(home, '.agents', 'skills')],
+  },
+  {
+    id: 'home',
+    label: '用户主目录 (~/skills)',
+    configFiles: [],
+    skillDirs: [join(home, 'skills')],
+  },
 ]
 
-// 各 Agent 的 Skills 目录
-const SKILL_SOURCE_DIRS = [
-  { id: 'claude', label: 'Claude Code (~/.claude/skills)', dir: join(home, '.claude', 'skills') },
-  { id: 'codebuddy', label: 'CodeBuddy (~/.codebuddy/skills)', dir: join(home, '.codebuddy', 'skills') },
-  { id: 'cursor', label: 'Cursor (~/.cursor/skills)', dir: join(home, '.cursor', 'skills') },
-  { id: 'gemini', label: 'Gemini CLI (~/.gemini/skills)', dir: join(home, '.gemini', 'skills') },
-  { id: 'agents', label: '通用 (~/.agents/skills)', dir: join(home, '.agents', 'skills') },
-  { id: 'home', label: '用户主目录 (~/skills)', dir: join(home, 'skills') },
-]
+// 用户覆盖的导入路径（持久化在 data/import-paths.json）
+const IMPORT_PATHS_FILE = join(__dirname, 'import-paths.json')
+let importPathOverrides = {}
+function loadImportPathOverrides() {
+  try {
+    if (fs.existsSync(IMPORT_PATHS_FILE)) {
+      importPathOverrides = JSON.parse(fs.readFileSync(IMPORT_PATHS_FILE, 'utf-8'))
+    }
+  } catch (e) {
+    console.error('加载 import-paths.json 失败:', e)
+  }
+}
+function saveImportPathOverrides() {
+  fs.writeFileSync(IMPORT_PATHS_FILE, JSON.stringify(importPathOverrides, null, 2))
+}
+loadImportPathOverrides()
+
+// 取得某 Agent 生效中的配置（默认 + 用户覆盖合并）
+function getEffectiveSource(id) {
+  const def = IMPORT_SOURCE_DEFAULTS.find((s) => s.id === id)
+  if (!def) return null
+  const ov = importPathOverrides[id]
+  return {
+    id: def.id,
+    label: def.label,
+    configFiles: ov && Array.isArray(ov.configFiles) && ov.configFiles.length ? ov.configFiles : def.configFiles,
+    skillDirs: ov && Array.isArray(ov.skillDirs) && ov.skillDirs.length ? ov.skillDirs : def.skillDirs,
+    isOverridden: !!(ov && ((Array.isArray(ov.configFiles) && ov.configFiles.length) || (Array.isArray(ov.skillDirs) && ov.skillDirs.length))),
+  }
+}
 
 function readJsonIfExists(file) {
   try {
@@ -646,11 +854,13 @@ function normalizeMcpEntry(name, raw) {
   }
 }
 
-function collectMcpServers() {
+function collectMcpServersFor(ids) {
   const sources = []
-  for (const s of MCP_SOURCE_CANDIDATES) {
+  const list = ids ? IMPORT_SOURCE_DEFAULTS.filter((s) => ids.includes(s.id)) : IMPORT_SOURCE_DEFAULTS
+  for (const def of list) {
+    const eff = getEffectiveSource(def.id)
     const servers = []
-    for (const f of s.paths) {
+    for (const f of eff.configFiles) {
       const cfg = readJsonIfExists(f)
       if (!cfg) continue
       // 兼容对象 { mcpServers: { name: cfg } }、数组 [{ name, ... }] 两种形态
@@ -672,51 +882,73 @@ function collectMcpServers() {
         }
       }
     }
-    if (servers.length) sources.push({ id: s.id, label: s.label, servers })
+    if (servers.length) sources.push({ id: eff.id, label: eff.label, servers })
   }
   return sources
 }
 
-async function scanImportableSkills() {
+async function scanImportableSkillsFor(ids) {
   const sources = []
-  for (const s of SKILL_SOURCE_DIRS) {
-    let entries
-    try {
-      entries = await fsp.readdir(s.dir, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    const skills = []
-    for (const e of entries) {
-      if (!e.isDirectory()) continue
-      const skillDir = path.join(s.dir, e.name)
-      const skillFile = path.join(skillDir, 'SKILL.md')
-      let content = ''
+  const list = ids ? IMPORT_SOURCE_DEFAULTS.filter((s) => ids.includes(s.id)) : IMPORT_SOURCE_DEFAULTS
+  for (const def of list) {
+    const eff = getEffectiveSource(def.id)
+    const foundDirs = []
+    for (const dir of eff.skillDirs) {
+      let entries
       try {
-        content = await fsp.readFile(skillFile, 'utf-8')
+        entries = await fsp.readdir(dir, { withFileTypes: true })
       } catch {
         continue
       }
-      const fm = parseSkillFrontmatter(content)
-      skills.push({
-        name: fm.name || e.name,
-        dirName: e.name,
-        description: fm.description || '',
-        path: skillDir,
-      })
+      foundDirs.push({ dir, entries })
     }
-    if (skills.length) sources.push({ id: s.id, label: s.label, path: s.dir, skills })
+    const skills = []
+    for (const { dir, entries } of foundDirs) {
+      for (const e of entries) {
+        if (!e.isDirectory()) continue
+        const skillDir = path.join(dir, e.name)
+        const skillFile = path.join(skillDir, 'SKILL.md')
+        let content = ''
+        try {
+          content = await fsp.readFile(skillFile, 'utf-8')
+        } catch {
+          continue
+        }
+        const fm = parseSkillFrontmatter(content)
+        skills.push({
+          name: fm.name || e.name,
+          dirName: e.name,
+          description: fm.description || '',
+          path: skillDir,
+        })
+      }
+    }
+    if (skills.length) sources.push({ id: eff.id, label: eff.label, path: eff.skillDirs.join(', '), skills })
   }
   return sources
+}
+
+// 返回所有 Agent 的来源定义（含生效路径与是否覆盖标记），供前端编辑
+function listImportSourceDefs() {
+  return IMPORT_SOURCE_DEFAULTS.map((def) => {
+    const eff = getEffectiveSource(def.id)
+    return {
+      id: eff.id,
+      label: eff.label,
+      configFiles: eff.configFiles,
+      skillDirs: eff.skillDirs,
+      isOverridden: eff.isOverridden,
+    }
+  })
 }
 
 app.get('/api/import/sources', async (_req, res) => {
   try {
     const [mcpSources, skillSources] = await Promise.all([
-      Promise.resolve(collectMcpServers()),
-      scanImportableSkills(),
+      Promise.resolve(collectMcpServersFor()),
+      scanImportableSkillsFor(),
     ])
-    res.json({ mcpSources, skillSources })
+    res.json({ sources: listImportSourceDefs(), mcpSources, skillSources })
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) })
   }
@@ -733,14 +965,67 @@ async function copyDirRecursive(src, dest) {
   }
 }
 
-// 复制选中的技能到项目 skills/ 目录（校验源路径必须属于已扫描的 Agent 目录）
+// 跨平台软链接：Windows 下目录用 junction（普通用户免提权），其余用符号链接
+async function createLink(src, dest) {
+  const type = process.platform === 'win32' ? 'junction' : 'dir'
+  await fsp.symlink(src, dest, type)
+}
+
+// 保存用户自定义的导入路径（持久化覆盖层）
+app.put('/api/import/path', (req, res) => {
+  const { agentId, configFiles, skillDirs } = req.body || {}
+  const def = IMPORT_SOURCE_DEFAULTS.find((s) => s.id === agentId)
+  if (!def) {
+    res.status(400).json({ error: '未知的 Agent 来源: ' + agentId })
+    return
+  }
+  const normFiles = Array.isArray(configFiles)
+    ? configFiles.map((s) => String(s).trim()).filter(Boolean)
+    : def.configFiles
+  const normDirs = Array.isArray(skillDirs)
+    ? skillDirs.map((s) => String(s).trim()).filter(Boolean)
+    : def.skillDirs
+  importPathOverrides[agentId] = { configFiles: normFiles, skillDirs: normDirs }
+  saveImportPathOverrides()
+  res.json({ ok: true, source: getEffectiveSource(agentId) })
+})
+
+// 恢复某 Agent 到默认路径
+app.delete('/api/import/path', (req, res) => {
+  const { agentId } = req.body || {}
+  if (agentId && importPathOverrides[agentId]) {
+    delete importPathOverrides[agentId]
+    saveImportPathOverrides()
+  }
+  res.json({ ok: true, source: agentId ? getEffectiveSource(agentId) : null })
+})
+
+// 仅重新扫描单个 Agent 的 MCP 与 Skills（使用其当前生效路径）
+app.post('/api/import/scan', async (req, res) => {
+  const { agentId } = req.body || {}
+  if (!agentId) {
+    res.status(400).json({ error: 'agentId 不能为空' })
+    return
+  }
+  try {
+    const [mcpSources, skillSources] = await Promise.all([
+      Promise.resolve(collectMcpServersFor([agentId])),
+      scanImportableSkillsFor([agentId]),
+    ])
+    res.json({ mcpSources, skillSources })
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) })
+  }
+})
+
+// 把选中的技能软链接到项目 skills/ 目录（校验源路径必须属于已声明的 Agent 目录）
 app.post('/api/import/skills', async (req, res) => {
   const { items } = req.body || {}
   if (!Array.isArray(items) || !items.length) {
     res.status(400).json({ error: 'items 不能为空' })
     return
   }
-  const allowedRoots = SKILL_SOURCE_DIRS.map((s) => s.dir)
+  const allowedRoots = IMPORT_SOURCE_DEFAULTS.flatMap((def) => getEffectiveSource(def.id).skillDirs)
   const projectSkills = join(projectRootDir, 'skills')
   const results = []
   for (const it of items) {
@@ -756,7 +1041,8 @@ app.post('/api/import/skills', async (req, res) => {
       continue
     }
     try {
-      await copyDirRecursive(src, dest)
+      // 创建软链接（或 Windows junction），来源更新时项目内自动跟随
+      await createLink(src, dest)
       results.push({ name: dirName, status: 'imported', target: dest })
     } catch (e) {
       results.push({ name: dirName, status: 'error', error: String(e.message || e) })

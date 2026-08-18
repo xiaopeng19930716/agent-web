@@ -1,9 +1,9 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { Puzzle, RefreshCw, FolderOpen, AlertCircle, Sparkles, Download } from 'lucide-vue-next'
+import { ref, computed, onMounted, reactive } from 'vue'
+import { Puzzle, RefreshCw, FolderOpen, AlertCircle, Sparkles, Download, RotateCw, Save, Undo2, Folder } from 'lucide-vue-next'
 import { message } from 'ant-design-vue'
 import { settings, saveSettings } from '../settings.js'
-import { fetchSkills, fetchImportSources, importSkills } from '../api/agent.js'
+import { fetchSkills, fetchImportSources, importSkills, saveImportPath, resetImportPath, scanImportAgent } from '../api/agent.js'
 
 const skills = ref([])
 const sourceDirs = ref([])
@@ -15,9 +15,14 @@ const importOpen = ref(false)
 const importLoading = ref(false)
 const importError = ref('')
 const importSources = ref([]) // { id, label, path, skills: [{ name, dirName, description, path }] }
+const sourceDefs = ref([]) // { id, label, configFiles, skillDirs, isOverridden }
 const selectedSkills = ref(new Set()) // 元素: `${sourceId}::${dirName}`
 const importExisting = ref(new Set()) // 本地已存在的 dirName
 const importing = ref(false)
+// 每个来源的路径编辑草稿：{ [id]: { configFiles: string, skillDirs: string } }
+const pathDrafts = reactive({})
+const savingPathId = ref('')
+const rescanningId = ref('')
 
 function isEnabled(id) {
   return settings.enabledSkills.includes(id)
@@ -45,21 +50,92 @@ async function load() {
   sourceDirs.value = res.sourceDirs || []
 }
 
+function initPathDrafts(defs) {
+  for (const d of defs) {
+    if (!pathDrafts[d.id]) {
+      pathDrafts[d.id] = { configFiles: '', skillDirs: '' }
+    }
+    pathDrafts[d.id].configFiles = (d.configFiles || []).join('\n')
+    pathDrafts[d.id].skillDirs = (d.skillDirs || []).join('\n')
+  }
+}
+
 async function openImport() {
   importOpen.value = true
   importLoading.value = true
   importError.value = ''
   importSources.value = []
+  sourceDefs.value = []
   selectedSkills.value = new Set()
   importing.value = false
-  const [res] = await Promise.all([fetchImportSources()])
+  const res = await fetchImportSources()
   importLoading.value = false
   if (res.error) {
     importError.value = res.error
     return
   }
+  sourceDefs.value = res.sources || []
   importSources.value = res.skillSources || []
+  initPathDrafts(sourceDefs.value)
   importExisting.value = new Set(skills.value.filter((s) => s.id.startsWith('skills/')).map((s) => s.id.slice('skills/'.length)))
+}
+
+// 仅重新扫描某个 Agent（使用其当前生效路径）
+async function rescanAgent(id) {
+  rescanningId.value = id
+  const res = await scanImportAgent(id)
+  rescanningId.value = ''
+  if (res.error) {
+    message.error('重扫失败：' + res.error)
+    return
+  }
+  // 用返回结果更新该 Agent 在 importSources 中的条目
+  const mergeOne = (list) => {
+    for (const item of list) {
+      const idx = importSources.value.findIndex((x) => x.id === item.id)
+      if (idx >= 0) importSources.value[idx] = item
+      else importSources.value.push(item)
+    }
+  }
+  mergeOne(res.mcpSources || [])
+  mergeOne(res.skillSources || [])
+  message.success('已重新扫描 ' + (sourceDefs.value.find((d) => d.id === id)?.label || id))
+}
+
+// 保存某 Agent 的自定义路径
+async function saveAgentPaths(id) {
+  const draft = pathDrafts[id]
+  if (!draft) return
+  const configFiles = draft.configFiles.split('\n').map((s) => s.trim()).filter(Boolean)
+  const skillDirs = draft.skillDirs.split('\n').map((s) => s.trim()).filter(Boolean)
+  savingPathId.value = id
+  const res = await saveImportPath({ agentId: id, configFiles, skillDirs })
+  savingPathId.value = ''
+  if (!res.ok) {
+    message.error('保存路径失败：' + res.error)
+    return
+  }
+  const idx = sourceDefs.value.findIndex((d) => d.id === id)
+  if (idx >= 0 && res.source) sourceDefs.value[idx] = res.source
+  message.success('已保存路径，可点击「重新扫描」应用')
+}
+
+// 恢复某 Agent 默认路径
+async function resetAgentPaths(id) {
+  savingPathId.value = id
+  const res = await resetImportPath(id)
+  savingPathId.value = ''
+  if (!res.ok) {
+    message.error('恢复失败：' + res.error)
+    return
+  }
+  const idx = sourceDefs.value.findIndex((d) => d.id === id)
+  if (idx >= 0 && res.source) {
+    sourceDefs.value[idx] = res.source
+    pathDrafts[id].configFiles = (res.source.configFiles || []).join('\n')
+    pathDrafts[id].skillDirs = (res.source.skillDirs || []).join('\n')
+  }
+  message.success('已恢复默认路径')
 }
 
 const sourceAllChecked = (source) =>
@@ -100,7 +176,6 @@ async function doImport() {
   const imported = res.results.filter((r) => r.status === 'imported')
   const skipped = res.results.filter((r) => r.status === 'exists')
   const failed = res.results.filter((r) => r.status === 'error')
-  // 刷新列表并自动启用导入的技能
   await load()
   let enabled = 0
   for (const r of imported) {
@@ -112,7 +187,7 @@ async function doImport() {
   }
   saveSettings()
   const tip = []
-  if (imported.length) tip.push(`已导入 ${imported.length} 个`)
+  if (imported.length) tip.push(`已软链接 ${imported.length} 个`)
   if (skipped.length) tip.push(`跳过已存在 ${skipped.length} 个`)
   if (failed.length) tip.push(`失败 ${failed.length} 个`)
   message.success(tip.join('，') + (enabled ? `，并自动启用 ${enabled} 个` : ''))
@@ -135,12 +210,16 @@ onMounted(load)
       </div>
       <div class="flex items-center gap-2">
         <a-button @click="openImport">
-          <template #icon><Download :size="14" /></template>
-          从其他 Agent 导入
+          <span class="inline-flex items-center gap-1.5">
+            <Download :size="14" />
+            从其他 Agent 导入
+          </span>
         </a-button>
         <a-button :loading="loading" @click="load">
-          <template #icon><RefreshCw :size="14" /></template>
-          刷新
+          <span class="inline-flex items-center gap-1.5">
+            <RefreshCw :size="14" />
+            刷新
+          </span>
         </a-button>
       </div>
     </div>
@@ -214,7 +293,7 @@ onMounted(load)
       destroy-on-close
     >
       <p class="text-sm text-gray-500 mb-4">
-        扫描到以下 Agent 已配置的技能，勾选需要导入的项。导入后会复制到项目 <code class="text-gray-500 bg-gray-100 px-1 rounded">skills/</code> 目录并自动启用。
+        扫描到以下 Agent 已配置的技能，可编辑各 Agent 的配置文件路径后局部「重新扫描」，勾选需要导入的项。导入后会以软链接方式挂载到项目 <code class="text-gray-500 bg-gray-100 px-1 rounded">skills/</code> 目录并自动启用（来源更新自动跟随）。
       </p>
 
       <div v-if="importLoading" class="py-14 flex flex-col items-center gap-3 text-gray-400">
@@ -233,38 +312,71 @@ onMounted(load)
       </div>
 
       <div
-        v-else-if="!importSources.length"
+        v-else-if="!importSources.length && !sourceDefs.length"
         class="rounded-2xl border border-dashed border-gray-300 bg-white/50 px-4 py-12 text-center text-sm text-gray-400"
       >
         未发现其他 Agent 的技能
       </div>
 
-      <div v-else class="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
-        <div v-for="src in importSources" :key="src.id" class="rounded-2xl border border-gray-200 p-3">
-          <div class="flex items-center gap-2.5 mb-2">
-            <a-checkbox
-              :checked="sourceAllChecked(src)"
-              :indeterminate="
-                src.skills.some((s) => !importExisting.has(s.dirName) && selectedSkills.has(`${src.id}::${s.dirName}`)) &&
-                !sourceAllChecked(src)
-              "
-              @change="(e) => toggleSourceAll(src, e.target.checked)"
-            />
-            <span class="font-semibold text-gray-800 text-sm">{{ src.label }}</span>
-            <span class="text-xs text-gray-400">{{ src.skills.length }} 个</span>
+      <div v-else class="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
+        <div
+          v-for="def in sourceDefs"
+          :key="def.id"
+          class="rounded-2xl border border-gray-200 p-3 transition-colors"
+          :class="{ 'border-blue-200 bg-blue-50/30': def.isOverridden }"
+        >
+          <!-- 头部：名称 + 重扫 -->
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <span class="font-semibold text-gray-800 text-sm">{{ def.label }}</span>
+              <a-tag v-if="def.isOverridden" color="blue" class="!m-0 !text-xs">自定义路径</a-tag>
+            </div>
+            <a-button size="small" :loading="rescanningId === def.id" @click="rescanAgent(def.id)">
+              <span class="inline-flex items-center gap-1">
+                <RotateCw :size="13" />
+                重新扫描
+              </span>
+            </a-button>
           </div>
-          <div class="space-y-1.5 pl-6">
+
+          <!-- 路径编辑区：Skills 仅需配置扫描目录 -->
+          <div class="mb-2.5">
+            <label class="flex items-center gap-1 text-xs text-gray-500 mb-1">
+              <Folder :size="12" /> Skills 目录路径（每行一个，自动扫描其中的技能）
+            </label>
+            <textarea
+              v-model="pathDrafts[def.id].skillDirs"
+              rows="2"
+              class="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand/40"
+              placeholder="例如 C:\Users\you\.claude\skills"
+            ></textarea>
+          </div>
+          <div class="flex items-center gap-2 mb-3">
+            <a-button size="small" :loading="savingPathId === def.id" @click="saveAgentPaths(def.id)">
+              <span class="inline-flex items-center gap-1">
+                <Save :size="13" /> 保存路径
+              </span>
+            </a-button>
+            <a-button size="small" :disabled="!def.isOverridden || savingPathId === def.id" @click="resetAgentPaths(def.id)">
+              <span class="inline-flex items-center gap-1">
+                <Undo2 :size="13" /> 恢复默认
+              </span>
+            </a-button>
+          </div>
+
+          <!-- 已扫描的技能列表 -->
+          <div class="space-y-1.5 pl-1 border-t border-gray-100 pt-2.5">
             <div
-              v-for="s in src.skills"
+              v-for="s in (importSources.find((x) => x.id === def.id)?.skills || [])"
               :key="s.dirName"
               class="py-1.5 px-2 rounded-lg hover:bg-gray-50 transition-colors"
             >
               <div class="flex items-center gap-2.5">
                 <a-checkbox
-                  :checked="selectedSkills.has(`${src.id}::${s.dirName}`)"
+                  :checked="selectedSkills.has(`${def.id}::${s.dirName}`)"
                   :disabled="importExisting.has(s.dirName)"
                   @change="(e) => {
-                    const key = `${src.id}::${s.dirName}`
+                    const key = `${def.id}::${s.dirName}`
                     if (e.target.checked) selectedSkills.add(key)
                     else selectedSkills.delete(key)
                   }"
@@ -281,6 +393,12 @@ onMounted(load)
                 {{ s.description }}
               </p>
             </div>
+            <p
+              v-if="!(importSources.find((x) => x.id === def.id)?.skills || []).length"
+              class="text-xs text-gray-400 px-2 py-1"
+            >
+              该 Agent 未扫描到技能（可编辑路径后重新扫描）
+            </p>
           </div>
         </div>
       </div>

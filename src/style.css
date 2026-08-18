@@ -10,3 +10,21 @@
 * {
   box-sizing: border-box;
 }
+
+/* lucide 图标在 Ant Design Vue 按钮插槽内与文字对齐 */
+.ant-btn svg,
+.lucide {
+  vertical-align: -0.125em;
+}
+
+/* 让 a-button 成为 flex 容器，图标与文字垂直居中（覆盖 antd 的 > span inline-block） */
+.ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ant-btn > span {
+  display: inline-flex;
+  align-items: center;
+}

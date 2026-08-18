@@ -86,6 +86,54 @@ export async function fetchImportSources() {
   try {
     const resp = await fetch('/api/import/sources')
     const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) return { sources: [], mcpSources: [], skillSources: [], error: data.error || `请求失败: ${resp.status}` }
+    return { sources: data.sources || [], mcpSources: data.mcpSources || [], skillSources: data.skillSources || [] }
+  } catch (err) {
+    return { sources: [], mcpSources: [], skillSources: [], error: String(err) }
+  }
+}
+
+// 保存（覆盖）某 Agent 的导入路径配置
+export async function saveImportPath({ agentId, configFiles, skillDirs }) {
+  try {
+    const resp = await fetch('/api/import/path', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId, configFiles, skillDirs }),
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) return { ok: false, error: data.error || `请求失败: ${resp.status}` }
+    return { ok: true, source: data.source }
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
+}
+
+// 恢复某 Agent 到默认导入路径
+export async function resetImportPath(agentId) {
+  try {
+    const resp = await fetch('/api/import/path', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId }),
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) return { ok: false, error: data.error || `请求失败: ${resp.status}` }
+    return { ok: true, source: data.source }
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
+}
+
+// 仅重新扫描单个 Agent 的 MCP 与 Skills（使用其当前生效路径）
+export async function scanImportAgent(agentId) {
+  try {
+    const resp = await fetch('/api/import/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId }),
+    })
+    const data = await resp.json().catch(() => ({}))
     if (!resp.ok) return { mcpSources: [], skillSources: [], error: data.error || `请求失败: ${resp.status}` }
     return { mcpSources: data.mcpSources || [], skillSources: data.skillSources || [] }
   } catch (err) {
@@ -93,7 +141,23 @@ export async function fetchImportSources() {
   }
 }
 
-// 将选中的技能目录复制到项目 skills/ 目录
+// 通过预置供应商 vendor + baseURL + API Key 拉取模型列表（后端按 vendor 分派）
+export async function fetchModelsByVendor({ vendor, baseUrl, apiKey }) {
+  try {
+    const resp = await fetch('/api/models/fetch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vendor, baseUrl, apiKey }),
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) return { models: [], error: data.error || `请求失败: ${resp.status}` }
+    return { models: data.models || [], error: '' }
+  } catch (err) {
+    return { models: [], error: String(err) }
+  }
+}
+
+// 将选中的技能目录软链接（Windows 为 junction）到项目 skills/ 目录
 export async function importSkills(items) {
   try {
     const resp = await fetch('/api/import/skills', {

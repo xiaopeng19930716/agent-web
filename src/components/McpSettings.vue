@@ -1,9 +1,9 @@
 <script setup>
 import { ref, reactive, computed } from 'vue'
-import { Plus, Trash2, Server, CheckCircle2, XCircle, Download } from 'lucide-vue-next'
+import { Plus, Trash2, Server, CheckCircle2, XCircle, Download, RotateCw, Save, Undo2, FileText } from 'lucide-vue-next'
 import { message } from 'ant-design-vue'
 import { settings, saveSettings } from '../settings.js'
-import { testMcpServer, fetchImportSources } from '../api/agent.js'
+import { testMcpServer, fetchImportSources, saveImportPath, resetImportPath, scanImportAgent } from '../api/agent.js'
 
 const TYPE_OPTIONS = [
   { label: 'stdio（本地命令）', value: 'stdio' },
@@ -17,7 +17,7 @@ const TYPE_META = {
   sse: { label: 'sse', color: 'orange' },
 }
 
-const editing = ref(false)
+const editOpen = ref(false)
 const editId = ref('')
 const form = reactive({ name: '', type: 'stdio', command: '', url: '', enabled: true })
 const formError = ref('')
@@ -30,8 +30,12 @@ const importOpen = ref(false)
 const importLoading = ref(false)
 const importError = ref('')
 const importSources = ref([]) // { id, label, servers: [{ name, type, command, url, enabled }] }
+const sourceDefs = ref([]) // { id, label, configFiles, skillDirs, isOverridden }
 const selectedMcp = ref(new Set()) // 元素: `${sourceId}::${name}`
 const importExisting = ref(new Set()) // 已存在的 name（禁用勾选并标注）
+const pathDrafts = reactive({}) // { [id]: { configFiles, skillDirs } }
+const savingPathId = ref('')
+const rescanningId = ref('')
 
 function openImport() {
   importOpen.value = true
@@ -40,6 +44,14 @@ function openImport() {
   importSources.value = []
   selectedMcp.value = new Set()
   loadImportSources()
+}
+
+function initPathDrafts(defs) {
+  for (const d of defs) {
+    if (!pathDrafts[d.id]) pathDrafts[d.id] = { configFiles: '', skillDirs: '' }
+    pathDrafts[d.id].configFiles = (d.configFiles || []).join('\n')
+    pathDrafts[d.id].skillDirs = (d.skillDirs || []).join('\n')
+  }
 }
 
 async function loadImportSources() {
@@ -51,8 +63,63 @@ async function loadImportSources() {
     importError.value = res.error
     return
   }
+  sourceDefs.value = res.sources || []
   importSources.value = res.mcpSources || []
+  initPathDrafts(sourceDefs.value)
   importExisting.value = new Set(settings.mcpServers.map((s) => s.name))
+}
+
+// 仅重新扫描某个 Agent（使用其当前生效路径）
+async function rescanAgent(id) {
+  rescanningId.value = id
+  const res = await scanImportAgent(id)
+  rescanningId.value = ''
+  if (res.error) {
+    message.error('重扫失败：' + res.error)
+    return
+  }
+  for (const item of res.mcpSources || []) {
+    const idx = importSources.value.findIndex((x) => x.id === item.id)
+    if (idx >= 0) importSources.value[idx] = item
+    else importSources.value.push(item)
+  }
+  message.success('已重新扫描 ' + (sourceDefs.value.find((d) => d.id === id)?.label || id))
+}
+
+// 保存某 Agent 的自定义路径
+async function saveAgentPaths(id) {
+  const draft = pathDrafts[id]
+  if (!draft) return
+  const configFiles = draft.configFiles.split('\n').map((s) => s.trim()).filter(Boolean)
+  const skillDirs = draft.skillDirs.split('\n').map((s) => s.trim()).filter(Boolean)
+  savingPathId.value = id
+  const res = await saveImportPath({ agentId: id, configFiles, skillDirs })
+  savingPathId.value = ''
+  if (!res.ok) {
+    message.error('保存路径失败：' + res.error)
+    return
+  }
+  const idx = sourceDefs.value.findIndex((d) => d.id === id)
+  if (idx >= 0 && res.source) sourceDefs.value[idx] = res.source
+  message.success('已保存路径，可点击「重新扫描」应用')
+}
+
+// 恢复某 Agent 默认路径
+async function resetAgentPaths(id) {
+  savingPathId.value = id
+  const res = await resetImportPath(id)
+  savingPathId.value = ''
+  if (!res.ok) {
+    message.error('恢复失败：' + res.error)
+    return
+  }
+  const idx = sourceDefs.value.findIndex((d) => d.id === id)
+  if (idx >= 0 && res.source) {
+    sourceDefs.value[idx] = res.source
+    pathDrafts[id].configFiles = (res.source.configFiles || []).join('\n')
+    pathDrafts[id].skillDirs = (res.source.skillDirs || []).join('\n')
+  }
+  message.success('已恢复默认路径')
 }
 
 function toggleSourceAll(source, checked) {
@@ -112,7 +179,7 @@ function startAdd() {
   editId.value = ''
   Object.assign(form, { name: '', type: 'stdio', command: '', url: '', enabled: true })
   formError.value = ''
-  editing.value = true
+  editOpen.value = true
 }
 
 function startEdit(id) {
@@ -127,11 +194,11 @@ function startEdit(id) {
     enabled: s.enabled !== false,
   })
   formError.value = ''
-  editing.value = true
+  editOpen.value = true
 }
 
 function cancelEdit() {
-  editing.value = false
+  editOpen.value = false
   editId.value = ''
   formError.value = ''
 }
@@ -165,7 +232,7 @@ function save() {
     settings.mcpServers.push(payload)
   }
   saveSettings()
-  editing.value = false
+  editOpen.value = false
   editId.value = ''
 }
 
@@ -202,8 +269,10 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
         </p>
       </div>
       <a-button @click="openImport">
-        <template #icon><Download :size="14" /></template>
-        从其他 Agent 导入
+        <span class="inline-flex items-center gap-1.5">
+          <Download :size="14" />
+          从其他 Agent 导入
+        </span>
       </a-button>
     </div>
 
@@ -232,7 +301,9 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
           </a-button>
           <a-button size="small" @click="startEdit(s.id)">编辑</a-button>
           <a-popconfirm title="确定删除该 MCP Server？" ok-text="删除" cancel-text="取消" @confirm="removeServer(s.id)">
-            <a-button size="small" danger><Trash2 :size="14" /></a-button>
+            <a-button size="small" danger>
+              <Trash2 :size="14" />
+            </a-button>
           </a-popconfirm>
         </div>
         <!-- 测试结果 -->
@@ -249,7 +320,7 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
 
       <!-- 空态 -->
       <div
-        v-if="!settings.mcpServers.length && !editing"
+        v-if="!settings.mcpServers.length && !editOpen"
         class="rounded-2xl border border-dashed border-gray-300 bg-white/50 px-4 py-10 text-center text-sm text-gray-400"
       >
         还没有 MCP Server，点击下方添加或从其他 Agent 导入。
@@ -257,7 +328,7 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
 
       <!-- 添加卡片 -->
       <button
-        v-if="!editing"
+        v-if="!editOpen"
         type="button"
         class="w-full flex flex-col items-center justify-center h-20 rounded-2xl border border-dashed border-gray-300 bg-white/50 text-gray-500 transition-all duration-150 hover:border-brand hover:text-brand cursor-pointer"
         @click="startAdd"
@@ -265,38 +336,6 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
         <Plus :size="20" />
         <span class="text-sm mt-1 font-medium">添加 MCP Server</span>
       </button>
-
-      <!-- 编辑表单 -->
-      <div v-if="editing" class="rounded-2xl border border-brand/30 bg-white shadow-sm p-5">
-        <div class="text-sm font-semibold text-gray-800 mb-4">{{ editId ? '编辑 MCP Server' : '新增 MCP Server' }}</div>
-        <div class="space-y-4">
-          <div>
-            <span class="block text-xs font-semibold text-gray-700 mb-1">名称 <span class="text-red-500">*</span></span>
-            <a-input v-model:value="form.name" placeholder="如：filesystem / fetch" />
-          </div>
-          <div>
-            <span class="block text-xs font-semibold text-gray-700 mb-1">类型</span>
-            <a-select v-model:value="form.type" :options="TYPE_OPTIONS" class="w-full" />
-          </div>
-          <div v-if="form.type === 'stdio'">
-            <span class="block text-xs font-semibold text-gray-700 mb-1">启动命令 <span class="text-red-500">*</span></span>
-            <a-input v-model:value="form.command" placeholder="如：npx @modelcontextprotocol/server-filesystem ./data" />
-          </div>
-          <div v-else>
-            <span class="block text-xs font-semibold text-gray-700 mb-1">服务器 URL <span class="text-red-500">*</span></span>
-            <a-input v-model:value="form.url" placeholder="https://..." />
-          </div>
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-gray-700">启用</span>
-            <a-switch v-model:checked="form.enabled" />
-          </div>
-          <div class="flex items-center gap-2">
-            <a-button type="primary" @click="save">保存</a-button>
-            <a-button @click="cancelEdit">取消</a-button>
-            <span v-if="formError" class="text-sm text-red-500">{{ formError }}</span>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- 导入弹窗 -->
@@ -308,7 +347,7 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
       destroy-on-close
     >
       <p class="text-sm text-gray-500 mb-4">
-        扫描到以下 Agent 已配置的 MCP Server，勾选需要导入的项（已存在同名项会自动跳过）。
+        扫描到以下 Agent 已配置的 MCP Server，可编辑各 Agent 的配置文件路径后局部「重新扫描」，勾选需要导入的项（已存在同名项会自动跳过）。
       </p>
 
       <div v-if="importLoading" class="py-14 flex flex-col items-center gap-3 text-gray-400">
@@ -327,37 +366,70 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
       </div>
 
       <div
-        v-else-if="!importSources.length"
+        v-else-if="!importSources.length && !sourceDefs.length"
         class="rounded-2xl border border-dashed border-gray-300 bg-white/50 px-4 py-12 text-center text-sm text-gray-400"
       >
         未发现其他 Agent 的 MCP 配置
       </div>
 
-      <div v-else class="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
-        <div v-for="src in importSources" :key="src.id" class="rounded-2xl border border-gray-200 p-3">
-          <div class="flex items-center gap-2.5 mb-2">
-            <a-checkbox
-              :checked="sourceAllChecked(src)"
-              :indeterminate="
-                src.servers.some((s) => !importExisting.has(s.name) && selectedMcp.has(`${src.id}::${s.name}`)) &&
-                !sourceAllChecked(src)
-              "
-              @change="(e) => toggleSourceAll(src, e.target.checked)"
-            />
-            <span class="font-semibold text-gray-800 text-sm">{{ src.label }}</span>
-            <span class="text-xs text-gray-400">{{ src.servers.length }} 个</span>
+      <div v-else class="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
+        <div
+          v-for="def in sourceDefs"
+          :key="def.id"
+          class="rounded-2xl border border-gray-200 p-3 transition-colors"
+          :class="{ 'border-blue-200 bg-blue-50/30': def.isOverridden }"
+        >
+          <!-- 头部：名称 + 重扫 -->
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <span class="font-semibold text-gray-800 text-sm">{{ def.label }}</span>
+              <a-tag v-if="def.isOverridden" color="blue" class="!m-0 !text-xs">自定义路径</a-tag>
+            </div>
+            <a-button size="small" :loading="rescanningId === def.id" @click="rescanAgent(def.id)">
+              <span class="inline-flex items-center gap-1">
+                <RotateCw :size="13" />
+                重新扫描
+              </span>
+            </a-button>
           </div>
-          <div class="space-y-1.5 pl-6">
+
+          <!-- 路径编辑区：MCP 自动扫描配置文件中的 Server，仅需配置配置文件路径 -->
+          <div class="mb-2.5">
+            <label class="flex items-center gap-1 text-xs text-gray-500 mb-1">
+              <FileText :size="12" /> MCP 配置文件路径（每行一个，自动扫描其中的 Server）
+            </label>
+            <textarea
+              v-model="pathDrafts[def.id].configFiles"
+              rows="2"
+              class="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand/40"
+              placeholder="例如 C:\Users\you\.claude.json"
+            ></textarea>
+          </div>
+          <div class="flex items-center gap-2 mb-3">
+            <a-button size="small" :loading="savingPathId === def.id" @click="saveAgentPaths(def.id)">
+              <span class="inline-flex items-center gap-1">
+                <Save :size="13" /> 保存路径
+              </span>
+            </a-button>
+            <a-button size="small" :disabled="!def.isOverridden || savingPathId === def.id" @click="resetAgentPaths(def.id)">
+              <span class="inline-flex items-center gap-1">
+                <Undo2 :size="13" /> 恢复默认
+              </span>
+            </a-button>
+          </div>
+
+          <!-- 已扫描的 MCP 列表 -->
+          <div class="space-y-1.5 pl-1 border-t border-gray-100 pt-2.5">
             <div
-              v-for="s in src.servers"
+              v-for="s in (importSources.find((x) => x.id === def.id)?.servers || [])"
               :key="s.name"
               class="flex items-center gap-2.5 py-1.5 px-2 rounded-lg hover:bg-gray-50 transition-colors"
             >
               <a-checkbox
-                :checked="selectedMcp.has(`${src.id}::${s.name}`)"
+                :checked="selectedMcp.has(`${def.id}::${s.name}`)"
                 :disabled="importExisting.has(s.name)"
                 @change="(e) => {
-                  const key = `${src.id}::${s.name}`
+                  const key = `${def.id}::${s.name}`
                   if (e.target.checked) selectedMcp.add(key)
                   else selectedMcp.delete(key)
                 }"
@@ -373,6 +445,12 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
                 </div>
               </div>
             </div>
+            <p
+              v-if="!(importSources.find((x) => x.id === def.id)?.servers || []).length"
+              class="text-xs text-gray-400 px-2 py-1"
+            >
+              该 Agent 未扫描到 MCP Server（可编辑路径后重新扫描）
+            </p>
           </div>
         </div>
       </div>
@@ -382,6 +460,44 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
         <a-button type="primary" :disabled="!selectedMcpCount" @click="importSelectedMcp">
           导入所选（{{ selectedMcpCount }}）
         </a-button>
+      </div>
+    </a-modal>
+
+    <!-- MCP 配置编辑对话框 -->
+    <a-modal
+      v-model:open="editOpen"
+      :title="editId ? '编辑 MCP Server' : '新增 MCP Server'"
+      :width="520"
+      :footer="null"
+      destroy-on-close
+      @cancel="cancelEdit"
+    >
+      <div class="space-y-4 pt-1">
+        <div>
+          <span class="block text-xs font-semibold text-gray-700 mb-1">名称 <span class="text-red-500">*</span></span>
+          <a-input v-model:value="form.name" placeholder="如：filesystem / fetch" />
+        </div>
+        <div>
+          <span class="block text-xs font-semibold text-gray-700 mb-1">类型</span>
+          <a-select v-model:value="form.type" :options="TYPE_OPTIONS" class="w-full" />
+        </div>
+        <div v-if="form.type === 'stdio'">
+          <span class="block text-xs font-semibold text-gray-700 mb-1">启动命令 <span class="text-red-500">*</span></span>
+          <a-input v-model:value="form.command" placeholder="如：npx @modelcontextprotocol/server-filesystem ./data" />
+        </div>
+        <div v-else>
+          <span class="block text-xs font-semibold text-gray-700 mb-1">服务器 URL <span class="text-red-500">*</span></span>
+          <a-input v-model:value="form.url" placeholder="https://..." />
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-gray-700">启用</span>
+          <a-switch v-model:checked="form.enabled" />
+        </div>
+        <div v-if="formError" class="text-sm text-red-500">{{ formError }}</div>
+        <div class="flex items-center justify-end gap-2 pt-1">
+          <a-button @click="cancelEdit">取消</a-button>
+          <a-button type="primary" @click="save">保存</a-button>
+        </div>
       </div>
     </a-modal>
   </div>
