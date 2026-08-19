@@ -16,6 +16,7 @@ export async function streamChat(messages, { config, projectId, onDelta, onDone,
     const reader = resp.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+    let meta = null
 
     while (true) {
       const { done, value } = await reader.read()
@@ -31,7 +32,7 @@ export async function streamChat(messages, { config, projectId, onDelta, onDone,
         if (!line.startsWith('data:')) continue
         const data = line.slice(5).trim()
         if (data === '[DONE]') {
-          onDone?.()
+          onDone?.(meta)
           return
         }
         try {
@@ -40,6 +41,10 @@ export async function streamChat(messages, { config, projectId, onDelta, onDone,
             onError?.(json.error)
             return
           }
+          if (json.type === 'meta') {
+            meta = json
+            continue
+          }
           const delta = json.choices?.[0]?.delta?.content || ''
           if (delta) onDelta?.(delta)
         } catch {
@@ -47,7 +52,7 @@ export async function streamChat(messages, { config, projectId, onDelta, onDone,
         }
       }
     }
-    onDone?.()
+    onDone?.(meta)
   } catch (err) {
     onError?.(String(err))
   }

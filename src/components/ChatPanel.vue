@@ -4,8 +4,10 @@ import { marked } from 'marked'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 import { Shield, Brain, Plus } from 'lucide-vue-next'
+import { Button as AButton } from 'ant-design-vue'
 import { streamChat } from '../api/agent.js'
-import { settings } from '../settings.js'
+import ChatLogDrawer from './ChatLogDrawer.vue'
+import { settings, flattenVendors } from '../settings.js'
 import {
   projects,
   activeProjectId,
@@ -84,22 +86,33 @@ async function pickDirectory() {
 const active = computed(() => getActiveProject())
 
 // 模型按供应商分组
-const vendorNameMap = {
+const PRESET_VENDOR_NAMES = {
   'bailian-coding': '阿里云百炼 · Coding Plan',
   'bailian-token': '阿里云百炼 · Token Plan',
   deepseek: 'DeepSeek',
   zhipu: '智谱 GLM · Coding Plan',
   tencent: '腾讯混元 · Coding',
 }
+// 合并预置供应商名 + 自定义供应商名（自定义用填写时的 name）
+const vendorNameMap = computed(() => {
+  const m = { ...PRESET_VENDOR_NAMES }
+  const customs = Array.isArray(settings.customVendors) ? settings.customVendors : []
+  for (const v of customs) {
+    if (v && v.key) m[v.key] = v.name || v.key
+  }
+  return m
+})
 function vendorLabel(vk) {
   if (!vk) return '其他 / 自定义'
-  return vendorNameMap[vk] || vk
+  return vendorNameMap.value[vk] || vk
 }
 const groupedModels = computed(() => {
-  const list = Array.isArray(settings.models) ? settings.models : []
+  const list = flattenVendors(settings.vendors)
+  const disabled = new Set(Array.isArray(settings.disabledVendors) ? settings.disabledVendors : [])
   const groups = new Map()
   for (const m of list) {
     const key = m.vendorKey || '__custom__'
+    if (key !== '__custom__' && disabled.has(key)) continue
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key).push(m)
   }
@@ -114,6 +127,7 @@ const groupedModels = computed(() => {
 // 当前会话对象
 const activeSession = computed(() => sessions.list.find((s) => s.id === sessions.activeSessionId) || null)
 const currentMessages = computed(() => (activeSession.value ? activeSession.value.messages : []))
+const showLog = ref(false)
 
 // 会话标题重命名
 const editingTitle = ref(false)
@@ -232,10 +246,10 @@ async function send() {
 
   const pid = active.value?.id ?? null
   error.value = ''
-  session.messages.push({ role: 'user', content: text })
+  session.messages.push({ role: 'user', content: text, metadata: { timestamp: Date.now() } })
   input.value = ''
 
-  const assistant = reactive({ role: 'assistant', content: '' })
+  const assistant = reactive({ role: 'assistant', content: '', metadata: {} })
   session.messages.push(assistant)
   loading.value = true
   await scrollToBottom()
@@ -244,8 +258,11 @@ async function send() {
     .filter((m) => m !== assistant)
     .map((m) => ({ role: m.role, content: m.content }))
 
-  const modelId = (pid && active.value.modelId) || settings.activeModel
-  const modelObj = settings.models.find((m) => m.id === modelId) || {}
+  // activeModel 为组合键 "vendorKey/modelId"
+  const activeModelId = settings.activeModel.includes('/') ? settings.activeModel.split('/')[1] : settings.activeModel
+  const modelId = (pid && active.value.modelId) || activeModelId
+  const flat = flattenVendors(settings.vendors)
+  const modelObj = flat.find((m) => m.id === modelId) || {}
   const effectiveBaseUrl = modelObj.baseUrl?.trim() || settings.baseUrl
   const effectiveApiKey = (modelObj.apiKey && modelObj.apiKey.trim()) || settings.apiKey
 
@@ -254,7 +271,7 @@ async function send() {
       baseUrl: effectiveBaseUrl,
       apiKey: effectiveApiKey,
       model: modelId,
-      temperature: settings.temperature,
+      temperature: typeof modelObj.temperature === 'number' ? modelObj.temperature : 0.3,
       maxTokens: modelObj.maxTokens || undefined,
     },
     projectId: pid,
@@ -264,8 +281,16 @@ async function send() {
       assistant.content += delta
       scrollToBottom()
     },
-    onDone: async () => {
+    onDone: async (meta) => {
       loading.value = false
+      // 回填助手消息的元数据日志（时间、模型、token、耗时、状态）
+      assistant.metadata = {
+        timestamp: Date.now(),
+        model: meta?.model || modelId,
+        tokens: meta?.tokens ?? null,
+        durationMs: meta?.durationMs ?? null,
+        status: meta?.status || 'ok',
+      }
       // 首条消息作为标题 + 落盘
       if (!session.title || session.title === '新对话') {
         session.title = text.slice(0, 30) || '新对话'
@@ -275,6 +300,13 @@ async function send() {
     },
     onError: (msg) => {
       error.value = msg
+      assistant.metadata = {
+        timestamp: Date.now(),
+        model: modelId,
+        tokens: null,
+        durationMs: null,
+        status: 'error',
+      }
       loading.value = false
     },
   })
@@ -315,6 +347,11 @@ watch(currentMessages, scrollToBottom)
         title="双击修改会话名称"
         @dblclick="startRenameTitle"
       >{{ activeSession.title || '新对话' }}</span>
+      <a-button
+        class="chat__log-btn"
+        size="small"
+        @click="showLog = true"
+      >对话日志</a-button>
     </div>
 
     <!-- 对话区（深色） -->
@@ -444,6 +481,8 @@ watch(currentMessages, scrollToBottom)
       </div>
     </div>
   </div>
+
+  <ChatLogDrawer v-model:open="showLog" :session="activeSession" />
 </template>
 
 <style scoped>
@@ -462,6 +501,10 @@ watch(currentMessages, scrollToBottom)
   align-items: center;
   min-height: 40px;
   flex-shrink: 0;
+}
+
+.chat__log-btn {
+  margin-left: auto;
 }
 .chat__titlebar-text {
   font-size: 15px;

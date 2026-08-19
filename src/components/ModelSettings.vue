@@ -1,9 +1,9 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { Check, Plus, Trash2, RefreshCw } from 'lucide-vue-next'
-import { settings, saveSettings, resetSettings } from '../settings.js'
+import { settings, saveModels, resetSettings, flattenVendors, platformToNpm, npmToPlatform, toPositiveNumber } from '../settings.js'
 import { fetchModelsByVendor } from '../api/agent.js'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 
 // 每个预置供应商在各类型下预设的 Base URL（切换类型/选中供应商时自动填入，可手动改）
 const PRESET_VENDORS = [
@@ -44,8 +44,9 @@ function firstNonEmptyType(baseUrls) {
   return 'openai'
 }
 
-const success = ref('')
 const fetchLoading = ref(false)
+// editing=false 为查看态（表单只读，仅显示"编辑 / 恢复默认"）；true 为编辑态
+const editing = ref(false)
 
 const allVendors = computed(() => [
   ...PRESET_VENDORS,
@@ -59,12 +60,40 @@ const isNew = computed(() => activeKey.value === '__new__')
 // 预置供应商 key 集合（用于唯一性校验：自定义供应商 Key 不得与预置冲突）
 const PRESET_VENDOR_KEYS = new Set(PRESET_VENDORS.map((v) => v.key))
 
-const emptyRow = () => ({ name: '', id: '', maxTokens: '' })
+const emptyRow = () => ({ name: '', id: '', maxTokens: '', temperature: 0.3 })
 const form = reactive({ name: '', website: '', vendorKey: '', baseUrl: '', apiKey: '', platform: 'openai', modelRows: [emptyRow()] })
 
-const modelsOfVendor = computed(() => settings.models.filter((m) => m.vendorKey === activeKey.value))
+const modelsOfVendor = computed(() => {
+  const v = settings.vendors[activeKey.value]
+  if (!v || !v.models) return []
+  return Object.entries(v.models).map(([id, m]) => ({
+    id,
+    name: (m && m.name) || id,
+    baseUrl: (m && m.baseUrl) || (v.options && v.options.baseURL) || '',
+    apiKey: (m && m.apiKey) || (v.options && v.options.apiKey) || '',
+    maxTokens: (m && m.maxTokens) ?? '',
+    temperature: (m && m.options && typeof m.options.temperature === 'number') ? m.options.temperature : 0.3,
+  }))
+})
 
 const isConfigured = (key) => settings.configuredVendors.includes(key)
+const isVendorDisabled = (key) => Array.isArray(settings.disabledVendors) && settings.disabledVendors.includes(key)
+function toggleVendorDisabled(key) {
+  if (!Array.isArray(settings.disabledVendors)) settings.disabledVendors = []
+  const i = settings.disabledVendors.indexOf(key)
+  if (i >= 0) settings.disabledVendors.splice(i, 1)
+  else settings.disabledVendors.push(key)
+  saveModels()
+  // 若当前活动模型属于被禁用的供应商，自动切到第一个可用模型
+  if (i < 0) {
+    const [avk, amid] = (settings.activeModel || '').split('/')
+    if (avk === key) {
+      const all = flattenVendors(settings.vendors)
+      const next = all.find((x) => x.vendorKey !== key && !isVendorDisabled(x.vendorKey))
+      settings.activeModel = next ? `${next.vendorKey}/${next.id}` : ''
+    }
+  }
+}
 
 function selectVendor(key) {
   activeKey.value = key
@@ -72,18 +101,25 @@ function selectVendor(key) {
     Object.assign(form, { name: '', website: '', vendorKey: '', baseUrl: '', apiKey: '', platform: 'openai', modelRows: [emptyRow()] })
   } else {
     const vendor = allVendors.value.find((v) => v.key === key)
-    const platform = vendor && vendor.baseUrls ? firstNonEmptyType(vendor.baseUrls) : 'openai'
+    const vCfg = settings.vendors[key]
+    const platform = vendor && vendor.baseUrls ? firstNonEmptyType(vendor.baseUrls) : (vCfg && vCfg.npm ? npmToPlatform(vCfg.npm) : 'openai')
     const rows = modelsOfVendor.value
+    const saved = rows.find((m) => m.baseUrl || m.apiKey)
+    // 供应商级 baseUrl/apiKey 优先取 settings.vendors[key].options
+    const vendorBase = (vCfg && vCfg.options && vCfg.options.baseURL) || ''
+    const vendorKey = (vCfg && vCfg.options && vCfg.options.apiKey) || ''
     Object.assign(form, {
-      name: vendor ? vendor.name : '',
+      name: (vendor && vendor.name) || (vCfg && vCfg.name) || '',
       website: (vendor && vendor.website) || '',
       vendorKey: vendor ? vendor.key : '',
-      baseUrl: vendor ? presetBaseUrl(vendor, platform) : '',
-      apiKey: '',
+      baseUrl: saved && saved.baseUrl ? saved.baseUrl : (vendorBase || (vendor ? presetBaseUrl(vendor, platform) : '')),
+      apiKey: saved && saved.apiKey ? saved.apiKey : (vendorKey || ''),
       platform,
-      modelRows: rows.length ? rows.map((m) => ({ name: m.name, id: m.id, maxTokens: m.maxTokens ?? '' })) : [emptyRow()],
+      modelRows: rows.length ? rows.map((m) => ({ name: m.name, id: m.id, maxTokens: m.maxTokens ?? '', temperature: m.temperature })) : [emptyRow()],
     })
   }
+  // 新增供应商或未配置过的供应商 → 直接进入编辑态；已配置 → 查看态
+  editing.value = isNew.value || !isConfigured(key)
 }
 
 function onPlatformChange() {
@@ -110,18 +146,24 @@ function toNumber(v) {
   const n = Number(v)
   return Number.isFinite(n) && n > 0 ? n : undefined
 }
-function save() {
-  let key = isNew.value ? form.vendorKey.trim() : activeVendor.value.key
+async function save() {
+  const newKey = form.vendorKey.trim()
+  const oldKey = isNew.value ? null : activeVendor.value.key
   if (!form.name.trim()) {
     message.error('供应商名称不能为空')
     return
   }
-  if (!key) {
+  if (!newKey) {
     message.error('供应商 Key 不能为空')
     return
   }
-  // 仅新增时做唯一性校验：不得与预置供应商或其他自定义供应商重复
-  if (isNew.value && (PRESET_VENDOR_KEYS.has(key) || settings.customVendors.some((v) => v.key === key))) {
+  // 唯一性校验：不得与预置供应商或其他自定义供应商重复（排除自身旧 key）
+  const conflict = !isNew.value && newKey !== oldKey
+  if (isNew.value && (PRESET_VENDOR_KEYS.has(newKey) || settings.customVendors.some((v) => v.key === newKey))) {
+    message.error('供应商 Key 已存在，请更换')
+    return
+  }
+  if (conflict && (PRESET_VENDOR_KEYS.has(newKey) || settings.customVendors.some((v) => v.key === newKey && v.key !== oldKey))) {
     message.error('供应商 Key 已存在，请更换')
     return
   }
@@ -138,48 +180,117 @@ function save() {
     }
     seen.add(r.id.trim())
   }
+  // 若 Key 发生变更，把旧 key 的供应商配置 / 自定义供应商 / 禁用状态一并迁移到新 key
+  if (!isNew.value && newKey !== oldKey) {
+    if (settings.vendors[oldKey]) {
+      settings.vendors[newKey] = settings.vendors[oldKey]
+      delete settings.vendors[oldKey]
+    }
+    const cv = settings.customVendors.find((v) => v.key === oldKey)
+    if (cv) cv.key = newKey
+    const di = settings.disabledVendors.indexOf(oldKey)
+    if (di >= 0) {
+      settings.disabledVendors.splice(di, 1)
+      if (!settings.disabledVendors.includes(newKey)) settings.disabledVendors.push(newKey)
+    }
+    // activeModel 组合键同步
+    if (settings.activeModel.startsWith(oldKey + '/')) {
+      settings.activeModel = newKey + settings.activeModel.slice(oldKey.length)
+    }
+  } else if (!settings.vendors[newKey]) {
+    settings.vendors[newKey] = { name: '', npm: '', options: { apiKey: '', baseURL: '' }, models: {} }
+  }
   if (isNew.value) {
-    settings.customVendors.push({ key, name: form.name.trim(), website: form.website.trim(), baseUrl: form.baseUrl.trim() })
-  } else if (key === 'custom') {
-    settings.customVendors = settings.customVendors.filter((v) => v.key !== 'custom')
+    settings.customVendors.push({ key: newKey, name: form.name.trim(), website: form.website.trim(), baseUrl: form.baseUrl.trim() })
+  } else {
+    // 已存在供应商：同步更新名称 / 官网
+    const exist = settings.customVendors.find((v) => v.key === newKey)
+    if (exist) {
+      exist.name = form.name.trim() || exist.name
+      exist.website = form.website.trim()
+      if (form.baseUrl.trim()) exist.baseUrl = form.baseUrl.trim()
+    }
   }
-  settings.models = settings.models.filter((m) => m.vendorKey !== key)
+  // 写入该供应商对象（标准格式）
+  const vCfg = settings.vendors[newKey]
+  vCfg.name = form.name.trim()
+  vCfg.npm = platformToNpm(form.platform)
+  vCfg.options = { apiKey: form.apiKey.trim(), baseURL: form.baseUrl.trim() }
+  // 用表单中现有的 model id 集合决定要删哪些、保留哪些
+  const newIds = new Set(rows.map((r) => r.id.trim()))
+  const preserved = {}
+  for (const [mid, m] of Object.entries(vCfg.models || {})) {
+    if (!newIds.has(mid)) preserved[mid] = m
+  }
+  const nextModels = {}
   for (const r of rows) {
-    settings.models.push({
-      id: r.id.trim(),
-      name: r.name.trim() || r.id.trim(),
-      baseUrl: form.baseUrl.trim(),
-      apiKey: form.apiKey.trim(),
-      vendorKey: key,
-      maxTokens: toNumber(r.maxTokens),
-    })
+    const id = r.id.trim()
+    const prev = preserved[id]
+    const opt = {}
+    const t = toPositiveNumber(r.temperature)
+    if (t !== undefined) opt.temperature = t
+    else if (prev && prev.options && typeof prev.options.temperature === 'number') opt.temperature = prev.options.temperature
+    else opt.temperature = 0.3
+    nextModels[id] = {
+      name: r.name.trim() || id,
+      ...(form.baseUrl.trim() ? { baseUrl: form.baseUrl.trim() } : {}),
+      ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
+      ...(toNumber(r.maxTokens) ? { maxTokens: toNumber(r.maxTokens) } : {}),
+      options: opt,
+    }
   }
-  markConfiguredVendor(key)
-  saveSettings()
-  activeKey.value = key
-  success.value = '保存成功'
-  setTimeout(() => (success.value = ''), 2500)
+  // 把未删除的历史模型附回
+  for (const [mid, m] of Object.entries(preserved)) nextModels[mid] = m
+  vCfg.models = nextModels
+  markConfiguredVendor(newKey)
+  const ok = await saveModels()
+  if (!ok) {
+    message.error('保存失败，请稍后重试')
+    return
+  }
+  activeKey.value = newKey
+  editing.value = false
+  message.success('保存成功')
 }
 
 function deleteCustomVendor(key) {
   if (!confirm('确定删除该自定义供应商？其下模型也会一并移除。')) return
   settings.customVendors = settings.customVendors.filter((v) => v.key !== key)
-  settings.models = settings.models.filter((m) => m.vendorKey !== key)
+  delete settings.vendors[key]
   const idx = settings.configuredVendors.indexOf(key)
   if (idx !== -1) settings.configuredVendors.splice(idx, 1)
+  // activeModel 若属于被删供应商，重置
+  if (settings.activeModel && settings.activeModel.startsWith(key + '/')) {
+    const firstVk = Object.keys(settings.vendors)[0]
+    const firstMid = firstVk ? Object.keys(settings.vendors[firstVk].models || {})[0] : ''
+    settings.activeModel = firstVk && firstMid ? `${firstVk}/${firstMid}` : ''
+  }
   if (activeKey.value === key) {
     activeKey.value = PRESET_VENDORS[0].key
     selectVendor(PRESET_VENDORS[0].key)
   }
-  saveSettings()
+  saveModels()
 }
 
 function resetDefaults() {
-  resetSettings()
-  activeKey.value = PRESET_VENDORS[0].key
-  selectVendor(PRESET_VENDORS[0].key)
-  success.value = '已恢复默认设置'
-  setTimeout(() => (success.value = ''), 2500)
+  Modal.confirm({
+    title: '恢复默认设置',
+    content: '此操作将清除所有自定义的供应商、模型与配置，并恢复为初始状态，且不可撤销。确定继续？',
+    okText: '恢复默认',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk() {
+      resetSettings()
+      activeKey.value = PRESET_VENDORS[0].key
+      selectVendor(PRESET_VENDORS[0].key)
+      message.success('已恢复默认设置')
+    },
+  })
+}
+
+// 从查看态进入编辑态
+function startEdit() {
+  editing.value = true
 }
 
 async function fetchModels() {
@@ -214,7 +325,7 @@ async function fetchModels() {
     }
     // 模型较多时只填入前 10 个，其余可手动添加
     const MAX_FETCH_ROWS = 10
-    form.modelRows = models.slice(0, MAX_FETCH_ROWS).map((m) => ({ name: m.name || m.id, id: m.id, maxTokens: '' }))
+    form.modelRows = models.slice(0, MAX_FETCH_ROWS).map((m) => ({ name: m.name || m.id, id: m.id, maxTokens: '', temperature: 0.3 }))
     message.success(models.length > MAX_FETCH_ROWS ? `已获取 ${models.length} 个模型，仅填入前 ${MAX_FETCH_ROWS} 个` : `已获取 ${models.length} 个模型`)
   } finally {
     fetchLoading.value = false
@@ -229,38 +340,51 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
     <!-- 供应商卡片 -->
     <section class="mb-8">
       <h3 class="text-base font-semibold text-gray-700 mb-3">供应商</h3>
-      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+      <div class="grid grid-cols-2 gap-3">
         <div
           v-for="v in allVendors"
           :key="v.key"
           role="button"
           tabindex="0"
-          class="group relative flex items-center justify-between h-16 text-left rounded-xl border bg-white px-4 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md cursor-pointer"
-          :class="activeKey === v.key ? 'border-brand ring-2 ring-brand/30' : 'border-gray-200'"
+          class="group relative flex items-center justify-between gap-2 rounded-xl border bg-white px-4 py-3 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md cursor-pointer"
+          :class="[
+            activeKey === v.key ? 'border-brand ring-2 ring-brand/30' : 'border-gray-200',
+            isVendorDisabled(v.key) ? 'opacity-60' : '',
+          ]"
           @click="selectVendor(v.key)"
           @keydown.enter="selectVendor(v.key)"
         >
-          <span class="text-sm font-semibold text-gray-800 truncate pr-6">{{ v.name }}</span>
-          <span
-            v-if="isConfigured(v.key)"
-            class="shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-500 text-white"
-            title="已配置"
-          >
-            <Check :size="11" :stroke-width="3" />
-          </span>
-          <button
-            v-if="v.isCustomVendor"
-            type="button"
-            title="删除该供应商"
-            class="absolute top-1 right-1 inline-flex items-center justify-center w-5 h-5 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
-            @click.stop="deleteCustomVendor(v.key)"
-          >
-            <Trash2 :size="13" />
-          </button>
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="truncate text-sm font-semibold text-gray-800">{{ v.name }}</span>
+            <a-badge
+              v-if="isConfigured(v.key)"
+              status="success"
+              text="已配置"
+              class="shrink-0"
+            />
+          </div>
+          <div class="flex shrink-0 items-center gap-2" @click.stop>
+            <a-switch
+              v-if="isConfigured(v.key)"
+              :checked="!isVendorDisabled(v.key)"
+              :title="isVendorDisabled(v.key) ? '点击启用（其模型将显示在对话下拉中）' : '点击禁用（其模型不显示在对话下拉中）'"
+              size="small"
+              @change="() => toggleVendorDisabled(v.key)"
+            />
+            <button
+              v-if="v.isCustomVendor"
+              type="button"
+              title="删除该供应商"
+              class="inline-flex items-center justify-center w-5 h-5 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+              @click.stop="deleteCustomVendor(v.key)"
+            >
+              <Trash2 :size="13" />
+            </button>
+          </div>
         </div>
         <button
           type="button"
-          class="flex flex-col items-center justify-center h-16 rounded-xl border border-dashed border-gray-300 bg-gray-50/50 px-4 text-gray-500 transition-all duration-150 hover:border-brand hover:text-brand cursor-pointer"
+          class="flex h-full flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50/50 px-4 py-3 text-gray-500 transition-all duration-150 hover:border-brand hover:text-brand cursor-pointer"
           :class="activeKey === '__new__' ? 'border-brand ring-2 ring-brand/30 text-brand' : ''"
           @click="selectVendor('__new__')"
         >
@@ -273,7 +397,9 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
     <!-- 配置表单 -->
     <section class="rounded-2xl border border-gray-200 bg-white shadow-sm p-6">
       <div class="flex items-center justify-between mb-5">
-        <h3 class="text-lg font-semibold text-gray-800">{{ isNew ? '新增自定义供应商' : activeVendor.name }}</h3>
+        <h3 class="text-lg font-semibold text-gray-800">
+          {{ isNew ? '新增自定义供应商' : (editing ? '编辑 · ' + activeVendor.name : '查看 · ' + activeVendor.name) }}
+        </h3>
       </div>
       <div class="space-y-5">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -283,6 +409,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
               v-model:value="form.name"
               placeholder="如：我的私有服务"
               size="middle"
+              :disabled="!editing"
             />
           </label>
           <label class="block">
@@ -291,6 +418,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
               v-model:value="form.website"
               placeholder="https://..."
               size="middle"
+              :disabled="!editing"
             />
           </label>
         </div>
@@ -300,7 +428,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
             v-model:value="form.vendorKey"
             placeholder="如：my-llm-service（唯一标识，用于获取模型列表）"
             size="middle"
-            :disabled="!isNew"
+            :disabled="!editing"
           />
           <span class="text-[11px] text-gray-400 mt-1 block">{{ isNew ? '自定义供应商需手动填写 Key，保存后不可修改' : '预置 / 已保存供应商的 Key 不可修改' }}</span>
         </label>
@@ -312,6 +440,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
               style="width: 200px"
               size="middle"
               :options="TYPE_OPTIONS"
+              :disabled="!editing"
               @change="onPlatformChange"
             />
             <a-input
@@ -319,6 +448,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
               placeholder="https://..."
               size="middle"
               style="width: calc(100% - 200px)"
+              :disabled="!editing"
             />
           </a-input-group>
           <span class="text-[11px] text-gray-400 mt-1 block">切换类型时，若 Base URL 为空会自动填入对应兼容模式的默认地址，也可手动修改。</span>
@@ -329,6 +459,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
             v-model:value="form.apiKey"
             placeholder="sk-..."
             autocomplete="off"
+            :disabled="!editing"
           />
         </label>
         <div>
@@ -336,7 +467,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
             <span class="text-xs font-semibold text-gray-700">模型（名称 / ID / Max Tokens，可添加多组）</span>
             <button
               type="button"
-              :disabled="fetchLoading"
+              :disabled="!editing || fetchLoading"
               class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium border border-brand/40 text-brand rounded-lg hover:bg-brand/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
               @click="fetchModels"
             >
@@ -350,11 +481,13 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
                 v-model:value="row.name"
                 placeholder="模型名称（界面显示）"
                 size="middle"
+                :disabled="!editing"
               />
               <a-input
                 v-model:value="row.id"
                 placeholder="模型 ID（发给大模型）"
                 size="middle"
+                :disabled="!editing"
               />
               <a-input-number
                 v-model:value="row.maxTokens"
@@ -363,12 +496,24 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
                 placeholder="Max Tokens"
                 size="middle"
                 class="w-64"
+                :disabled="!editing"
+              />
+              <a-input-number
+                v-model:value="row.temperature"
+                :min="0"
+                :max="2"
+                :step="0.1"
+                placeholder="温度"
+                size="middle"
+                class="w-32"
+                :disabled="!editing"
               />
               <button
                 v-if="i === form.modelRows.length - 1"
                 type="button"
                 title="添加模型行"
-                class="shrink-0 inline-flex items-center justify-center w-9 h-9 text-brand hover:text-brand-dark hover:bg-brand/10 rounded-lg transition-colors cursor-pointer"
+                :disabled="!editing"
+                class="shrink-0 inline-flex items-center justify-center w-9 h-9 text-brand hover:text-brand-dark hover:bg-brand/10 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 @click="addModelRow"
               >
                 <Plus :size="18" />
@@ -377,7 +522,8 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
                 v-else
                 type="button"
                 title="删除该模型行"
-                class="shrink-0 inline-flex items-center justify-center w-9 h-9 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                :disabled="!editing"
+                class="shrink-0 inline-flex items-center justify-center w-9 h-9 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 @click="removeModelRow(i)"
               >
                 <Trash2 :size="16" />
@@ -386,21 +532,31 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
           </div>
         </div>
         <div class="flex items-center gap-3 pt-2">
-          <button
-            type="button"
-            class="bg-brand hover:bg-brand-dark text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer"
-            @click="save"
-          >
-            保存
-          </button>
-          <button
-            type="button"
-            class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm transition-colors cursor-pointer"
-            @click="resetDefaults"
-          >
-            恢复默认
-          </button>
-          <span v-if="success" class="text-sm text-green-600">{{ success }}</span>
+          <template v-if="editing">
+            <button
+              type="button"
+              class="bg-brand hover:bg-brand-dark text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+              @click="save"
+            >
+              保存
+            </button>
+            <button
+              type="button"
+              class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm transition-colors cursor-pointer"
+              @click="resetDefaults"
+            >
+              恢复默认
+            </button>
+          </template>
+          <template v-else>
+            <button
+              type="button"
+              class="bg-brand hover:bg-brand-dark text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+              @click="startEdit"
+            >
+              编辑
+            </button>
+          </template>
         </div>
       </div>
     </section>

@@ -1,10 +1,35 @@
 [
   {
-    "id": "s_msyg2zbq5c6r",
+    "id": "s_mszq5p5r7ub1",
     "projectId": "__none__",
-    "title": "1212",
-    "messages": [],
-    "createdAt": 1787044378454,
-    "updatedAt": 1787044779626
+    "title": "模型测试",
+    "messages": [
+      {
+        "role": "user",
+        "content": "你是什么模型"
+      },
+      {
+        "role": "assistant",
+        "content": "我是通义千问（Qwen），由阿里巴巴通义实验室研发的大语言模型。"
+      },
+      {
+        "role": "user",
+        "content": "你是什么模型"
+      },
+      {
+        "role": "assistant",
+        "content": "我是通义千问（Qwen），由阿里巴巴集团通义实验室自主研发的大语言模型。"
+      },
+      {
+        "role": "user",
+        "content": "具体型号"
+      },
+      {
+        "role": "assistant",
+        "content": "关于具体的模型版本和技术细节，建议您查阅通义千问的官方网站或相关的技术报告，以获取最准确和详尽的信息。"
+      }
+    ],
+    "createdAt": 1787121767583,
+    "updatedAt": 1787133709479
   }
 ]

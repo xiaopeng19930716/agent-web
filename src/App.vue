@@ -142,6 +142,7 @@ function selectSession(id) {
   if (s) {
     activeProjectId.id = s.projectId && s.projectId !== NO_PROJECT_KEY ? s.projectId : ''
   }
+  router.push('/chat')
 }
 
 // 删除会话：跳转到列表中的上一个会话；该项目会话删完则只显示项目名

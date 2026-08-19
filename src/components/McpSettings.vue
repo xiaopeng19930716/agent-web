@@ -2,24 +2,24 @@
 import { ref, reactive, computed } from 'vue'
 import { Plus, Trash2, Server, CheckCircle2, XCircle, Download, RotateCw, Save, Undo2, FileText } from 'lucide-vue-next'
 import { message } from 'ant-design-vue'
-import { settings, saveSettings } from '../settings.js'
+import { settings, saveMcp } from '../settings.js'
 import { testMcpServer, fetchImportSources, saveImportPath, resetImportPath, scanImportAgent } from '../api/agent.js'
 
 const TYPE_OPTIONS = [
-  { label: 'stdio（本地命令）', value: 'stdio' },
+  { label: 'local（本地命令）', value: 'local' },
   { label: 'http', value: 'http' },
   { label: 'sse', value: 'sse' },
 ]
 
 const TYPE_META = {
-  stdio: { label: 'stdio', color: 'blue' },
+  local: { label: 'local', color: 'blue' },
   http: { label: 'http', color: 'green' },
   sse: { label: 'sse', color: 'orange' },
 }
 
 const editOpen = ref(false)
 const editId = ref('')
-const form = reactive({ name: '', type: 'stdio', command: '', url: '', enabled: true })
+const form = reactive({ name: '', type: 'local', command: '', url: '', enabled: true })
 const formError = ref('')
 
 // 测试连接状态：{ [id]: { testing, ok, message } }
@@ -46,6 +46,22 @@ function openImport() {
   loadImportSources()
 }
 
+// 列表：把对象映射展开为数组，便于 v-for
+const mcpList = computed(() => {
+  const out = []
+  for (const [name, cfg] of Object.entries(settings.mcpServers)) {
+    if (!cfg || typeof cfg !== 'object') continue
+    const type = cfg.type || 'local'
+    const command = Array.isArray(cfg.command) ? cfg.command.join(' ') : ''
+    const url = cfg.url || ''
+    const enabled = !settings.disabledMcpServers.includes(name)
+    out.push({ name, type, command, url, enabled })
+  }
+  return out
+})
+
+const typeSummary = (s) => (s.type === 'local' || s.type === 'stdio' ? s.command : s.url)
+
 function initPathDrafts(defs) {
   for (const d of defs) {
     if (!pathDrafts[d.id]) pathDrafts[d.id] = { configFiles: '', skillDirs: '' }
@@ -66,7 +82,7 @@ async function loadImportSources() {
   sourceDefs.value = res.sources || []
   importSources.value = res.mcpSources || []
   initPathDrafts(sourceDefs.value)
-  importExisting.value = new Set(settings.mcpServers.map((s) => s.name))
+  importExisting.value = new Set(Object.keys(settings.mcpServers))
 }
 
 // 仅重新扫描某个 Agent（使用其当前生效路径）
@@ -144,7 +160,7 @@ function importSelectedMcp() {
   }
   let added = 0
   let skipped = 0
-  const existingNames = new Set(settings.mcpServers.map((s) => s.name))
+  const existingNames = new Set(Object.keys(settings.mcpServers))
   for (const src of importSources.value) {
     for (const s of src.servers) {
       const key = `${src.id}::${s.name}`
@@ -153,20 +169,22 @@ function importSelectedMcp() {
         skipped++
         continue
       }
-      settings.mcpServers.push({
-        id: 'mcp-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-        name: s.name,
-        type: s.type,
-        command: s.command || '',
-        url: s.url || '',
-        enabled: s.enabled !== false,
-        source: src.label,
-      })
+      const type = s.type === 'http' || s.type === 'sse' ? s.type : 'local'
+      const cfg = { type }
+      if (type === 'local') {
+        cfg.command = (s.command || '').split(/\s+/).filter(Boolean)
+      } else {
+        cfg.url = s.url || ''
+      }
+      settings.mcpServers[s.name] = cfg
+      if (s.enabled === false && !settings.disabledMcpServers.includes(s.name)) {
+        settings.disabledMcpServers.push(s.name)
+      }
       existingNames.add(s.name)
       added++
     }
   }
-  saveSettings()
+  saveMcp()
   const tip = []
   if (added) tip.push(`已导入 ${added} 个`)
   if (skipped) tip.push(`跳过重名 ${skipped} 个`)
@@ -177,21 +195,22 @@ function importSelectedMcp() {
 // ===== 本地编辑 =====
 function startAdd() {
   editId.value = ''
-  Object.assign(form, { name: '', type: 'stdio', command: '', url: '', enabled: true })
+  Object.assign(form, { name: '', type: 'local', command: '', url: '', enabled: true })
   formError.value = ''
   editOpen.value = true
 }
 
-function startEdit(id) {
-  const s = settings.mcpServers.find((x) => x.id === id)
-  if (!s) return
-  editId.value = id
+function startEdit(name) {
+  const cfg = settings.mcpServers[name]
+  if (!cfg) return
+  editId.value = name
+  const type = cfg.type === 'http' || cfg.type === 'sse' ? cfg.type : 'local'
   Object.assign(form, {
-    name: s.name,
-    type: s.type,
-    command: s.command || '',
-    url: s.url || '',
-    enabled: s.enabled !== false,
+    name,
+    type,
+    command: Array.isArray(cfg.command) ? cfg.command.join(' ') : '',
+    url: cfg.url || '',
+    enabled: !settings.disabledMcpServers.includes(name),
   })
   formError.value = ''
   editOpen.value = true
@@ -209,54 +228,68 @@ function save() {
     formError.value = '请填写服务器名称'
     return
   }
-  if (form.type === 'stdio' && !form.command.trim()) {
-    formError.value = 'stdio 类型需要填写启动命令'
+  if (form.type === 'local' && !form.command.trim()) {
+    formError.value = 'local 类型需要填写启动命令'
     return
   }
   if ((form.type === 'http' || form.type === 'sse') && !/^https?:\/\//i.test(form.url.trim())) {
     formError.value = 'http/sse 类型需要填写合法的 URL'
     return
   }
-  const payload = {
-    id: editId.value || 'mcp-' + Date.now(),
-    name: form.name.trim(),
-    type: form.type,
-    command: form.type === 'stdio' ? form.command.trim() : '',
-    url: form.type === 'http' || form.type === 'sse' ? form.url.trim() : '',
-    enabled: form.enabled,
+  const name = form.name.trim()
+  if (settings.mcpServers[name] && editId.value !== name) {
+    formError.value = '已存在同名 MCP Server'
+    return
   }
-  if (editId.value) {
-    const idx = settings.mcpServers.findIndex((x) => x.id === editId.value)
-    if (idx !== -1) settings.mcpServers.splice(idx, 1, payload)
-  } else {
-    settings.mcpServers.push(payload)
+  if (editId.value && editId.value !== name) {
+    delete settings.mcpServers[editId.value]
+    settings.disabledMcpServers = settings.disabledMcpServers.filter((n) => n !== editId.value)
   }
-  saveSettings()
+  const cfg = { type: form.type }
+  if (form.type === 'local') cfg.command = form.command.trim().split(/\s+/).filter(Boolean)
+  else cfg.url = form.url.trim()
+  settings.mcpServers[name] = cfg
+  if (form.enabled) {
+    settings.disabledMcpServers = settings.disabledMcpServers.filter((n) => n !== name)
+  } else if (!settings.disabledMcpServers.includes(name)) {
+    settings.disabledMcpServers.push(name)
+  }
+  saveMcp()
   editOpen.value = false
   editId.value = ''
 }
 
-function removeServer(id) {
-  settings.mcpServers = settings.mcpServers.filter((x) => x.id !== id)
-  saveSettings()
-  if (editId.value === id) cancelEdit()
+function removeServer(name) {
+  delete settings.mcpServers[name]
+  settings.disabledMcpServers = settings.disabledMcpServers.filter((n) => n !== name)
+  saveMcp()
+  if (editId.value === name) cancelEdit()
 }
 
-async function testConnection(id) {
-  const s = settings.mcpServers.find((x) => x.id === id)
-  if (!s) return
-  const st = (testStates[id] = testStates[id] || { testing: false, ok: null, message: '' })
+function toggleEnabled(name, enabled) {
+  const idx = settings.disabledMcpServers.indexOf(name)
+  if (enabled && idx >= 0) settings.disabledMcpServers.splice(idx, 1)
+  else if (!enabled && idx < 0) settings.disabledMcpServers.push(name)
+  saveMcp()
+}
+
+async function testConnection(name) {
+  const cfg = settings.mcpServers[name]
+  if (!cfg) return
+  const st = (testStates[name] = testStates[name] || { testing: false, ok: null, message: '' })
   st.testing = true
   st.ok = null
   st.message = ''
-  const payload = s.type === 'stdio' ? { type: 'stdio', command: s.command } : { type: s.type, url: s.url }
+  const type = cfg.type === 'http' || cfg.type === 'sse' ? cfg.type : 'stdio'
+  const payload = type === 'stdio'
+    ? { type: 'stdio', command: (Array.isArray(cfg.command) ? cfg.command.join(' ') : '') }
+    : { type, url: cfg.url }
   const res = await testMcpServer(payload)
   st.testing = false
   st.ok = !!res.ok
   st.message = res.error || (res.status ? `已连通（HTTP ${res.status}）` : '连接成功')
 }
 
-const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
 </script>
 
 <template>
@@ -279,8 +312,8 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
     <div class="space-y-3">
       <!-- 列表 -->
       <div
-        v-for="s in settings.mcpServers"
-        :key="s.id"
+        v-for="s in mcpList"
+        :key="s.name"
         class="rounded-2xl border border-gray-200 bg-white shadow-sm px-4 py-3 transition-all duration-150 hover:shadow-md"
         :class="{ 'opacity-60': !s.enabled }"
       >
@@ -290,17 +323,16 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
             <div class="flex items-center gap-2 flex-wrap">
               <span class="font-semibold text-gray-800 text-sm">{{ s.name }}</span>
               <a-tag :color="TYPE_META[s.type].color" class="!m-0">{{ TYPE_META[s.type].label }}</a-tag>
-              <a-tag v-if="s.source" class="!m-0 text-gray-400">{{ s.source }}</a-tag>
               <a-tag v-if="!s.enabled" class="!m-0">已停用</a-tag>
             </div>
             <div class="text-xs text-gray-500 font-mono truncate mt-0.5">{{ typeSummary(s) }}</div>
           </div>
-          <a-switch v-model:checked="s.enabled" @change="saveSettings" />
-          <a-button size="small" :loading="testStates[s.id]?.testing" @click="testConnection(s.id)">
+          <a-switch :checked="s.enabled" @change="(e) => toggleEnabled(s.name, e.target.checked)" />
+          <a-button size="small" :loading="testStates[s.name]?.testing" @click="testConnection(s.name)">
             测试连接
           </a-button>
-          <a-button size="small" @click="startEdit(s.id)">编辑</a-button>
-          <a-popconfirm title="确定删除该 MCP Server？" ok-text="删除" cancel-text="取消" @confirm="removeServer(s.id)">
+          <a-button size="small" @click="startEdit(s.name)">编辑</a-button>
+          <a-popconfirm title="确定删除该 MCP Server？" ok-text="删除" cancel-text="取消" @confirm="removeServer(s.name)">
             <a-button size="small" danger>
               <Trash2 :size="14" />
             </a-button>
@@ -308,19 +340,19 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
         </div>
         <!-- 测试结果 -->
         <div
-          v-if="testStates[s.id] && testStates[s.id].ok !== null"
+          v-if="testStates[s.name] && testStates[s.name].ok !== null"
           class="mt-2 flex items-center gap-1.5 text-xs"
-          :class="testStates[s.id].ok ? 'text-green-600' : 'text-red-500'"
+          :class="testStates[s.name].ok ? 'text-green-600' : 'text-red-500'"
         >
-          <CheckCircle2 v-if="testStates[s.id].ok" :size="14" />
+          <CheckCircle2 v-if="testStates[s.name].ok" :size="14" />
           <XCircle v-else :size="14" />
-          {{ testStates[s.id].message }}
+          {{ testStates[s.name].message }}
         </div>
       </div>
 
       <!-- 空态 -->
       <div
-        v-if="!settings.mcpServers.length && !editOpen"
+        v-if="!mcpList.length && !editOpen"
         class="rounded-2xl border border-dashed border-gray-300 bg-white/50 px-4 py-10 text-center text-sm text-gray-400"
       >
         还没有 MCP Server，点击下方添加或从其他 Agent 导入。
@@ -441,7 +473,7 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
                   <a-tag v-if="importExisting.has(s.name)" color="default" class="!m-0 !text-xs">已存在</a-tag>
                 </div>
                 <div class="text-xs text-gray-400 font-mono truncate mt-0.5">
-                  {{ s.type === 'stdio' ? s.command : s.url }}
+                  {{ s.type === 'local' || s.type === 'stdio' ? s.command : s.url }}
                 </div>
               </div>
             </div>
@@ -481,7 +513,7 @@ const typeSummary = (s) => (s.type === 'stdio' ? s.command : s.url)
           <span class="block text-xs font-semibold text-gray-700 mb-1">类型</span>
           <a-select v-model:value="form.type" :options="TYPE_OPTIONS" class="w-full" />
         </div>
-        <div v-if="form.type === 'stdio'">
+        <div v-if="form.type === 'local'">
           <span class="block text-xs font-semibold text-gray-700 mb-1">启动命令 <span class="text-red-500">*</span></span>
           <a-input v-model:value="form.command" placeholder="如：npx @modelcontextprotocol/server-filesystem ./data" />
         </div>

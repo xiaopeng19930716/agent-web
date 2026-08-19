@@ -1,8 +1,14 @@
 <script setup>
-import { useRoute } from 'vue-router'
-import { Cpu, Cable, Puzzle } from 'lucide-vue-next'
+import { useRoute, useRouter } from 'vue-router'
+import { Cpu, Cable, Puzzle, ArrowLeft } from 'lucide-vue-next'
 
 const route = useRoute()
+const router = useRouter()
+
+// 返回对话页
+function goChat() {
+  router.push('/chat')
+}
 
 const subMenus = [
   { key: 'models', label: '模型配置', icon: Cpu, path: '/settings/models' },
@@ -16,7 +22,15 @@ const isActive = (key) => route.path.endsWith(`/${key}`) || route.path === `/set
 <template>
   <div class="flex h-full min-h-0 flex-col">
     <!-- 顶部子菜单 -->
-    <header class="shrink-0 border-b border-gray-200 bg-white px-4 py-2">
+    <header class="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-2">
+      <button
+        type="button"
+        class="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-800"
+        @click="goChat"
+      >
+        <ArrowLeft :size="16" />
+        <span>返回对话</span>
+      </button>
       <nav class="flex items-center justify-end gap-1">
         <router-link
           v-for="item in subMenus"

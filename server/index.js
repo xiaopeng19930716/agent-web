@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { config } from 'dotenv'
 import { tool } from '@langchain/core/tools'
+import { BaseCallbackHandler } from '@langchain/core/callbacks/base'
 import { ChatOpenAI } from '@langchain/openai'
 import {
   HumanMessage,
@@ -146,6 +147,86 @@ app.get('/api/locate-dir', (req, res) => {
     walk(r, 1)
   }
   res.json({ results })
+})
+
+// ===== 用户全局配置（持久化到用户主目录，避免存于浏览器 localStorage）=====
+// 模型相关配置与 MCP 配置独立存储，便于分离管理；其余（skills 等）留在 settings.json
+const SETTINGS_DIR = join(os.homedir(), '.code-agent')
+const MODELS_FILE = join(SETTINGS_DIR, 'models.json')
+const MCP_FILE = join(SETTINGS_DIR, 'mcp.json')
+const SETTINGS_FILE = join(SETTINGS_DIR, 'settings.json')
+
+// 读取某个配置文件，缺失或损坏返回 null（调用方据此回退默认值）
+function readConfigFile(file) {
+  try {
+    if (fs.existsSync(file)) {
+      return JSON.parse(fs.readFileSync(file, 'utf-8'))
+    }
+  } catch {
+    // 损坏则忽略，回退默认
+  }
+  return null
+}
+
+// 写入某个配置文件（仅接受对象）
+function writeConfigFile(file, body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return false
+  }
+  fs.mkdirSync(SETTINGS_DIR, { recursive: true })
+  fs.writeFileSync(file, JSON.stringify(body, null, 2))
+  return true
+}
+
+// ===== 模型配置（baseUrl/apiKey/models/activeModel/temperature/...）=====
+app.get('/api/settings/models', (_req, res) => {
+  res.json(readConfigFile(MODELS_FILE) || {})
+})
+
+app.put('/api/settings/models', (req, res) => {
+  try {
+    if (!writeConfigFile(MODELS_FILE, req.body)) {
+      res.status(400).json({ error: '无效的模型配置数据' })
+      return
+    }
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) })
+  }
+})
+
+// ===== MCP 配置（mcpServers）=====
+app.get('/api/settings/mcp', (_req, res) => {
+  res.json(readConfigFile(MCP_FILE) || {})
+})
+
+app.put('/api/settings/mcp', (req, res) => {
+  try {
+    if (!writeConfigFile(MCP_FILE, req.body)) {
+      res.status(400).json({ error: '无效的 MCP 配置数据' })
+      return
+    }
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) })
+  }
+})
+
+// ===== 其余配置（enabledSkills 等）=====
+app.get('/api/settings', (_req, res) => {
+  res.json(readConfigFile(SETTINGS_FILE) || {})
+})
+
+app.put('/api/settings', (req, res) => {
+  try {
+    if (!writeConfigFile(SETTINGS_FILE, req.body)) {
+      res.status(400).json({ error: '无效的配置数据' })
+      return
+    }
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) })
+  }
 })
 
 // ===== 会话存储（按项目归属，持久化对话消息）=====
@@ -375,7 +456,7 @@ const SYSTEM_PROMPT = `你是一个资深的全栈编程助手（Code Agent）�
 5. 保持聚焦，避免冗余寒暄。`
 
 // ===== 接收前端设置的运行时配置 =====
-function buildChatModel(cfg) {
+function buildChatModel(cfg, callbacks) {
   const baseUrl = (cfg.baseUrl || DASHSCOPE_BASE).replace(/\/$/, '')
   const apiKey = cfg.apiKey || API_KEY
   const model = cfg.model || DEFAULT_MODEL
@@ -389,11 +470,12 @@ function buildChatModel(cfg) {
     apiKey,
     configuration: { baseURL: baseUrl },
     streaming: true,
+    ...(callbacks ? { callbacks } : {}),
   })
 }
 
 // ===== Agent loop：流式输出 + 工具调用，限制在项目目录内 =====
-async function runAgent(model, history, projectRoot, res, permission = 'full') {
+async function runAgent(model, history, projectRoot, res, permission = 'full', callbacks) {
   const tools = buildTools(projectRoot, permission)
   const toolMap = Object.fromEntries(tools.map((t) => [t.name, t]))
   const modelWithTools = model.bindTools(tools)
@@ -405,7 +487,7 @@ async function runAgent(model, history, projectRoot, res, permission = 'full') {
     let toolCalls = []
     const callBuffers = {} // index -> {name, args, id}
 
-    const stream = await modelWithTools.stream(messages)
+    const stream = await modelWithTools.stream(messages, callbacks ? { callbacks } : undefined)
     for await (const chunk of stream) {
       if (typeof chunk.content === 'string' && chunk.content) {
         aiContent += chunk.content
@@ -488,23 +570,48 @@ app.post('/api/chat', async (req, res) => {
   res.setHeader('Connection', 'keep-alive')
   res.flushHeaders?.()
 
+  const startTime = Date.now()
+  const usageRef = { promptTokens: 0, completionTokens: 0 }
+
+  class TokenStatsHandler extends BaseCallbackHandler {
+    constructor() {
+      super()
+      this.name = 'TokenStatsHandler'
+    }
+    handleLLMEnd(output) {
+      const u = output?.llmOutput?.usage || output?.llmOutput?.tokenUsage || {}
+      usageRef.promptTokens += u.prompt_tokens || u.promptTokens || 0
+      usageRef.completionTokens += u.completion_tokens || u.completionTokens || 0
+    }
+  }
+  const callbacks = [new TokenStatsHandler()]
+
+  const writeMeta = (status) => {
+    const durationMs = Date.now() - startTime
+    const total = usageRef.promptTokens + usageRef.completionTokens
+    const tokens = total > 0 ? total : null
+    res.write(`data: ${JSON.stringify({ type: 'meta', model, tokens, durationMs, status })}\n\n`)
+  }
+
   try {
-    const chatModel = buildChatModel(cfg)
+    const chatModel = buildChatModel(cfg, callbacks)
     if (projectRoot) {
-      await runAgent(chatModel, (messages || []).map(toLangchainMessage), projectRoot, res, perm)
+      await runAgent(chatModel, (messages || []).map(toLangchainMessage), projectRoot, res, perm, callbacks)
     } else {
       // 无项目：直接流式补全
       const msgs = [new SystemMessage(SYSTEM_PROMPT + effortHint), ...(messages || []).map(toLangchainMessage)]
-      const stream = await chatModel.stream(msgs)
+      const stream = await chatModel.stream(msgs, { callbacks })
       for await (const chunk of stream) {
         if (typeof chunk.content === 'string' && chunk.content) {
           res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk.content } }] })}\n\n`)
         }
       }
     }
+    writeMeta('ok')
     res.write('data: [DONE]\n\n')
     res.end()
   } catch (err) {
+    writeMeta('error')
     res.write(`data: ${JSON.stringify({ error: String(err.message || err) })}\n\n`)
     res.end()
   }
