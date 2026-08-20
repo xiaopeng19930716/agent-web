@@ -120,17 +120,38 @@
           "durationMs": 1259,
           "status": "ok"
         }
+      },
+      {
+        "role": "user",
+        "content": "今天武汉天气怎么样",
+        "metadata": {
+          "timestamp": 1787221118377
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "<tool_call>\n<function=get_weather>\n<parameter=location>\n武汉\n</parameter>\n</function>\n</tool_call>",
+        "reasoning": "用户询问今天武汉的天气。\n这是一个实时信息查询，需要使用工具来获取。\n我将使用 `get_weather` 工具，传入地点 \"武汉\"。\n",
+        "reasoningDone": true,
+        "toolCalls": [],
+        "metadata": {
+          "timestamp": 1787221119563,
+          "model": "qwen3.7-max-2026-05-17",
+          "tokens": 1588,
+          "durationMs": 1166,
+          "status": "ok"
+        }
       }
     ],
     "createdAt": 1787121767583,
-    "updatedAt": 1787212063907
+    "updatedAt": 1787222531531
   },
   {
-    "id": "s_mt18wd7dm4wr",
-    "projectId": "p_mt18jzsjag1r",
+    "id": "s_mt1eebtw6z40",
+    "projectId": "__none__",
     "title": "新对话",
     "messages": [],
-    "createdAt": 1787213711065,
-    "updatedAt": 1787213711065
+    "createdAt": 1787222947172,
+    "updatedAt": 1787222947172
   }
 ]
