@@ -25,6 +25,13 @@ export function buildChatModel(cfg, callbacks) {
   const temperature = typeof cfg.temperature === 'number' ? cfg.temperature : 0.3
   const maxTokens =
     typeof cfg.maxTokens === 'number' && cfg.maxTokens > 0 ? cfg.maxTokens : undefined
+  const enableThinking = !!cfg.enableThinking
+  const modelKwargs = {}
+  // DashScope 开启思考链：透传 enable_thinking 与 reasoning 输出开关
+  if (enableThinking) {
+    modelKwargs.enable_thinking = true
+    modelKwargs.stream_options = { include_usage: true }
+  }
   return new ChatOpenAI({
     model,
     temperature,
@@ -32,16 +39,22 @@ export function buildChatModel(cfg, callbacks) {
     apiKey,
     configuration: { baseURL: baseUrl },
     streaming: true,
+    ...(Object.keys(modelKwargs).length ? { modelKwargs } : {}),
     ...(callbacks ? { callbacks } : {}),
   })
 }
 
 // Agent loop：流式输出 + 工具调用，限制在项目目录内
-export async function runAgent(model, history, projectRoot, res, permission = 'full', callbacks) {
-  const tools = buildTools(projectRoot, permission)
+export async function runAgent(model, history, projectRoot, res, permission = 'full', callbacks, opts = {}) {
+  const { enabledTools, skillPrompts = [], mcpTools = [] } = opts
+  const fileTools = buildTools(projectRoot, permission, enabledTools)
+  const tools = [...fileTools, ...mcpTools]
   const toolMap = Object.fromEntries(tools.map((t) => [t.name, t]))
-  const modelWithTools = model.bindTools(tools)
-  const messages = [new SystemMessage(SYSTEM_PROMPT), ...history]
+  // 空工具时不绑定（纯对话），避免 bindTools([]) 行为异常
+  const modelWithTools = tools.length ? model.bindTools(tools) : model
+  const sysText =
+    SYSTEM_PROMPT + (skillPrompts.length ? '\n\n已启用技能规范（请严格遵循以下技能来回答与操作）：\n' + skillPrompts.join('\n\n---\n\n') : '')
+  const messages = [new SystemMessage(sysText), ...history]
 
   const MAX_TURNS = 12
   for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -51,6 +64,11 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
 
     const stream = await modelWithTools.stream(messages, callbacks ? { callbacks } : undefined)
     for await (const chunk of stream) {
+      // 思考链（reasoning）增量
+      const reasoning = chunk.additional_kwargs?.reasoning_content
+      if (typeof reasoning === 'string' && reasoning) {
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning } }] })}\n\n`)
+      }
       if (typeof chunk.content === 'string' && chunk.content) {
         aiContent += chunk.content
         res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk.content } }] })}\n\n`)
@@ -82,14 +100,17 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
 
     for (const call of toolCalls) {
       const t = toolMap[call.name]
+      // 工具调用开始事件（结构化，进入思考区时间线）
+      res.write(`data: ${JSON.stringify({ type: 'tool_call', name: call.name, args: call.args, status: 'start' })}\n\n`)
       let result
       try {
         result = t ? await t.invoke(call.args) : '未知工具: ' + call.name
       } catch (e) {
         result = '工具执行错误: ' + String(e.message || e)
       }
-      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: `\n\n🔧 调用 ${call.name}(${JSON.stringify(call.args)})\n` } }] })}\n\n`)
-      messages.push(new ToolMessage({ content: String(result), tool_call_id: call.id }))
+      const safeResult = String(result)
+      res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'end', result: safeResult })}\n\n`)
+      messages.push(new ToolMessage({ content: safeResult, tool_call_id: call.id }))
     }
   }
 }

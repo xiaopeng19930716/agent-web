@@ -250,17 +250,17 @@ watch(
 )
 </script>
 
-<style scoped>
+<style scoped lang="less">
 .app {
   display: flex;
   height: 100vh;
-  background: #f8fafc;
+  background: @color-bg;
 }
 .sidebar {
   width: 280px;
   flex-shrink: 0;
   background: #ffffff;
-  border-right: 1px solid #e2e8f0;
+  border-right: 1px solid @color-border;
   display: flex;
   flex-direction: column;
   padding: 16px 12px;
@@ -272,44 +272,47 @@ watch(
   justify-content: center;
   gap: 8px;
   height: 40px;
-  border-radius: 10px;
-  border: 1px solid #2563eb;
-  background: #2563eb;
+  .btn-rounded(@radius-lg);
+  border: 1px solid @color-primary;
+  background: @color-primary;
   color: #fff;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s, transform 0.1s;
-}
-.new-chat:hover {
-  background: #1d4ed8;
-}
-.new-chat:active {
-  transform: scale(0.98);
+
+  &:hover {
+    background: @color-primary-hover;
+  }
+  &:active {
+    transform: scale(0.98);
+  }
 }
 .search {
   position: relative;
   display: flex;
   align-items: center;
-}
-.search__icon {
-  position: absolute;
-  left: 12px;
-  color: #94a3b8;
-}
-.search__input {
-  width: 100%;
-  height: 38px;
-  border-radius: 10px;
-  border: none;
-  background: #f1f5f9;
-  padding: 0 12px 0 34px;
-  font-size: 14px;
-  color: #1f2937;
-  outline: none;
-}
-.search__input:focus {
-  box-shadow: 0 0 0 2px #bfdbfe;
+
+  &__icon {
+    position: absolute;
+    left: 12px;
+    color: @color-text-muted;
+  }
+  &__input {
+    width: 100%;
+    height: 38px;
+    .btn-rounded(@radius-lg);
+    border: none;
+    background: @color-bg-subtle;
+    padding: 0 12px 0 34px;
+    font-size: 14px;
+    color: #1f2937;
+    outline: none;
+
+    &:focus {
+      box-shadow: 0 0 0 2px #bfdbfe;
+    }
+  }
 }
 .conv-list {
   flex: 1;
@@ -319,64 +322,66 @@ watch(
   gap: 2px;
   padding-right: 4px;
 }
-.conv-group__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 16px 8px 6px;
-}
-.conv-group__title {
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0;
-  color: #1e293b;
-}
-.conv-group__del {
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 5px;
-  color: #94a3b8;
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s, background 0.12s, color 0.12s;
-}
-.conv-group__head:hover .conv-group__del {
-  opacity: 1;
-}
-.conv-group__actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.conv-group__add {
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 5px;
-  color: #94a3b8;
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s, background 0.12s, color 0.12s;
-}
-.conv-group__head:hover .conv-group__add {
-  opacity: 1;
-}
-.conv-group__add:hover {
-  background: #dbeafe;
-  color: #2563eb;
-}
-.conv-group__del:hover {
-  background: #fee2e2;
-  color: #dc2626;
+.conv-group {
+  &__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 16px 8px 6px;
+  }
+  &__title {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0;
+    color: @color-text-strong;
+  }
+  &__del {
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    .btn-rounded(5px);
+    color: @color-text-muted;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s, background 0.12s, color 0.12s;
+  }
+  &__head:hover &__del {
+    opacity: 1;
+  }
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  &__add {
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    .btn-rounded(5px);
+    color: @color-text-muted;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s, background 0.12s, color 0.12s;
+  }
+  &__head:hover &__add {
+    opacity: 1;
+  }
+  &__add:hover {
+    background: #dbeafe;
+    color: @color-primary;
+  }
+  &__del:hover {
+    background: #fee2e2;
+    color: #dc2626;
+  }
 }
 .conv-item {
   display: flex;
@@ -386,97 +391,100 @@ watch(
   text-align: left;
   border: none;
   background: transparent;
-  border-radius: 8px;
+  .btn-rounded(@radius-md);
   padding: 9px 10px;
   cursor: pointer;
-  color: #334155;
+  color: @color-text;
   font-size: 14px;
   position: relative;
-}
-.conv-item:hover {
-  background: #f1f5f9;
-}
-.conv-item--active {
-  background: #eff6ff;
-  color: #1e40af;
-}
-.conv-item--active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
-  border-radius: 2px;
-  background: #2563eb;
-}
-.conv-item__icon {
-  color: #94a3b8;
-  flex-shrink: 0;
-}
-.conv-item--active .conv-item__icon {
-  color: #2563eb;
-}
-.conv-item__title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  cursor: text;
-  border-radius: 4px;
-  padding: 1px 2px;
-  margin: -1px -2px;
-}
-.conv-item__title:hover {
-  background: #e2e8f0;
-}
-.conv-item--editing {
-  background: #eff6ff;
-  cursor: text;
-}
-.conv-item__title-input {
-  flex: 1;
-  min-width: 0;
-  border: 1px solid #2563eb;
-  border-radius: 4px;
-  padding: 3px 6px;
-  font-size: 14px;
-  color: #1f2937;
-  background: #fff;
-  outline: none;
-  font-family: inherit;
-  box-shadow: 0 0 0 2px #bfdbfe;
-}
-.conv-item__del {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  color: #94a3b8;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s, background 0.12s, color 0.12s;
-}
-.conv-item:hover .conv-item__del {
-  opacity: 1;
-}
-.conv-item__del:hover {
-  background: #fee2e2;
-  color: #dc2626;
+
+  &:hover {
+    background: @color-bg-subtle;
+  }
+  &--active {
+    background: @color-primary-active-bg;
+    color: #1e40af;
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 8px;
+      bottom: 8px;
+      width: 3px;
+      .btn-rounded(2px);
+      background: @color-primary;
+    }
+  }
+  &__icon {
+    color: @color-text-muted;
+    flex-shrink: 0;
+  }
+  &--active &__icon {
+    color: @color-primary;
+  }
+  &__title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    cursor: text;
+    .btn-rounded(4px);
+    padding: 1px 2px;
+    margin: -1px -2px;
+
+    &:hover {
+      background: #e2e8f0;
+    }
+  }
+  &--editing {
+    background: @color-primary-active-bg;
+    cursor: text;
+  }
+  &__title-input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid @color-primary;
+    .btn-rounded(4px);
+    padding: 3px 6px;
+    font-size: 14px;
+    color: #1f2937;
+    background: #fff;
+    outline: none;
+    font-family: inherit;
+    box-shadow: 0 0 0 2px #bfdbfe;
+  }
+  &__del {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    .btn-rounded(@radius-sm);
+    color: @color-text-muted;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s, background 0.12s, color 0.12s;
+  }
+  &:hover &__del {
+    opacity: 1;
+  }
+  &__del:hover {
+    background: #fee2e2;
+    color: #dc2626;
+  }
 }
 .conv-empty {
-  color: #94a3b8;
+  color: @color-text-muted;
   font-size: 13px;
   text-align: center;
   padding: 24px 12px;
 }
 .sidebar__footer {
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid @color-border;
   padding-top: 12px;
   display: flex;
   flex-direction: column;
@@ -487,14 +495,15 @@ watch(
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-radius: 8px;
+  .btn-rounded(@radius-md);
   color: #475569;
   font-size: 14px;
   font-weight: 500;
   text-decoration: none;
-}
-.footer-setting:hover {
-  background: #f1f5f9;
+
+  &:hover {
+    background: @color-bg-subtle;
+  }
 }
 .main {
   flex: 1;

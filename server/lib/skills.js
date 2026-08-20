@@ -85,3 +85,33 @@ export async function scanSkills() {
   }
   return results
 }
+
+// 根据技能 id（如 "skills/agent-browser"）读取对应 SKILL.md 的完整内容
+// 返回 Map<id, content>；未找到或读取失败则跳过
+export async function loadSkillContents(ids) {
+  const idSet = new Set(Array.isArray(ids) ? ids : [])
+  if (!idSet.size) return new Map()
+  const out = new Map()
+  for (const dir of getCandidateSkillDirs()) {
+    let entries
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    const dirBase = path.basename(dir)
+    for (const e of entries) {
+      if (!e.isDirectory()) continue
+      const id = dirBase + '/' + e.name
+      if (!idSet.has(id)) continue
+      const skillFile = path.join(dir, e.name, 'SKILL.md')
+      try {
+        const content = await fsp.readFile(skillFile, 'utf-8')
+        out.set(id, content)
+      } catch {
+        // 无 SKILL.md：跳过
+      }
+    }
+  }
+  return out
+}

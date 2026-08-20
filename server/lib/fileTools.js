@@ -59,14 +59,72 @@ export function grep(root, pattern, dir, results, depth) {
   }
 }
 
-export function buildTools(root, permission = 'full') {
+// 列出某个相对目录下的直接子项（结构化，供 @ 文件面板浏览）
+// rel 为相对项目根目录的目录；跳过 node_modules/.git/隐藏文件（与 tree 规则一致）
+export function listDirectory(root, rel = '') {
+  const dir = safeResolve(root, rel || '')
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+    throw new Error('目录不存在或不是文件夹: ' + rel)
+  }
+  const entries = fs.readdirSync(dir, { withFileTypes: true })
+  const items = []
+  for (const e of entries) {
+    if (e.name === 'node_modules' || e.name === '.git' || e.name.startsWith('.')) continue
+    const relPath = rel ? path.join(rel, e.name).replace(/\\/g, '/') : e.name
+    items.push({
+      name: e.name,
+      type: e.isDirectory() ? 'dir' : 'file',
+      path: relPath, // 相对项目根的路径，前端用它拼接 @路径
+    })
+  }
+  // 目录在前、文件在后，各自按名称排序
+  items.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+  return { path: rel ? rel.replace(/\\/g, '/') : '', items }
+}
+
+// 全项目递归搜索文件名（模糊匹配），返回含完整相对路径的结果
+// 用于 @关键字 搜索：同名文件可通过 path 区分所在目录。限制结果数量与深度，性能可控。
+export function searchFiles(root, keyword, maxResults = 50) {
+  const kw = String(keyword || '').trim().toLowerCase()
+  const out = []
+  if (!kw) return out
+  const MAX_DEPTH = 10
+  const walk = (dir, rel, depth) => {
+    if (out.length >= maxResults || depth > MAX_DEPTH) return
+    let entries
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'dist' || e.name.startsWith('.')) continue
+      const relPath = rel ? `${rel}/${e.name}` : e.name
+      if (e.isDirectory()) {
+        walk(path.join(dir, e.name), relPath, depth + 1)
+      } else if (e.name.toLowerCase().includes(kw)) {
+        out.push({ name: e.name, type: 'file', path: relPath })
+        if (out.length >= maxResults) return
+      }
+    }
+  }
+  walk(root, '', 0)
+  return out
+}
+
+export function buildTools(root, permission = 'full', toolKeys) {
   // permission: 'full' 可写；'read-only' / 'none' 禁止写入文件
+  // toolKeys：可选，允许启用的工具 key（listFiles/readFile/writeFile/editFile/searchInProject）。
+  // 未传或非数组 -> 返回全部；空数组 -> 返回 []；否则按 key 过滤。
   const canWrite = permission === 'full'
   const writeGuard = async (fn) => {
     if (!canWrite) return '当前权限为只读，无法写入或编辑文件。如需修改文件，请在对话框中将权限级别切换为「完全访问」。'
     return fn()
   }
-  return [
+  const all = [
     tool(
       async ({ dir = '.' }) => {
         const out = []
@@ -161,4 +219,6 @@ export function buildTools(root, permission = 'full') {
       }
     ),
   ]
+  if (!Array.isArray(toolKeys)) return all
+  return all.filter((t) => toolKeys.includes(t.name))
 }

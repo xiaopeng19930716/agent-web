@@ -1,10 +1,13 @@
 // 调用本地后端，后端再流式转发百炼云
-export async function streamChat(messages, { config, projectId, onDelta, onDone, onError } = {}) {
+export async function streamChat(
+  messages,
+  { config, projectId, permission, effort, tools, skills, mcpServers, onDelta, onReasoning, onToolCall, onDone, onError } = {}
+) {
   try {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, config, projectId }),
+      body: JSON.stringify({ messages, config, projectId, permission, effort, tools, skills, mcpServers }),
     })
 
     if (!resp.ok) {
@@ -45,8 +48,14 @@ export async function streamChat(messages, { config, projectId, onDelta, onDone,
             meta = json
             continue
           }
+          if (json.type === 'tool_call') {
+            onToolCall?.(json)
+            continue
+          }
           const delta = json.choices?.[0]?.delta?.content || ''
           if (delta) onDelta?.(delta)
+          const reasoning = json.choices?.[0]?.delta?.reasoning || ''
+          if (reasoning) onReasoning?.(reasoning)
         } catch {
           // 忽略不完整 JSON
         }
@@ -173,6 +182,32 @@ export async function importSkills(items) {
     const data = await resp.json().catch(() => ({}))
     if (!resp.ok) return { results: [], error: data.error || `请求失败: ${resp.status}` }
     return { results: data.results || [] }
+  } catch (err) {
+    return { results: [], error: String(err) }
+  }
+}
+
+// 列出某项目指定相对目录下的文件/子目录（供 @ 文件面板浏览）
+export async function fetchProjectFiles(projectId, dir = '') {
+  try {
+    const url = `/api/projects/${encodeURIComponent(projectId)}/files` + (dir ? `?dir=${encodeURIComponent(dir)}` : '')
+    const resp = await fetch(url)
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) return { items: [], path: '', error: data.error || `请求失败: ${resp.status}` }
+    return { items: data.items || [], path: data.path || '', error: '' }
+  } catch (err) {
+    return { items: [], path: '', error: String(err) }
+  }
+}
+
+// 全项目递归搜索文件名（@关键字 场景），返回含完整相对路径的结果以区分同名文件
+export async function searchProjectFiles(projectId, keyword) {
+  try {
+    const url = `/api/projects/${encodeURIComponent(projectId)}/search?q=${encodeURIComponent(keyword)}`
+    const resp = await fetch(url)
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) return { results: [], error: data.error || `请求失败: ${resp.status}` }
+    return { results: data.results || [], error: '' }
   } catch (err) {
     return { results: [], error: String(err) }
   }

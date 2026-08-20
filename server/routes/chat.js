@@ -2,6 +2,8 @@ import { Router } from 'express'
 import { SystemMessage } from '@langchain/core/messages'
 import { projects } from '../lib/store.js'
 import { API_KEY, DEFAULT_MODEL } from '../lib/config.js'
+import { loadSkillContents } from '../lib/skills.js'
+import { loadMcpTools } from '../lib/mcpClient.js'
 import {
   buildChatModel,
   runAgent,
@@ -21,9 +23,13 @@ router.post('/chat', async (req, res) => {
     return
   }
 
-  const { messages, projectId, permission, effort } = req.body
+  const { messages, projectId, permission, effort, tools, skills, mcpServers } = req.body
   // 权限级别：read-only(只读) / full(完全访问) / none(不允许)；默认 full
   const perm = permission === 'read-only' || permission === 'none' ? permission : 'full'
+  const enabledTools = Array.isArray(tools) && tools.length ? tools : undefined
+
+  // 思考链（reasoning）：高思考强度或 qwen-thinking 系列模型时开启
+  const enableThinking = effort === 'high' || /thinking/i.test(model)
 
   // 若关联项目，校验后端已知的项目根目录
   let projectRoot = null
@@ -62,14 +68,28 @@ router.post('/chat', async (req, res) => {
   }
 
   try {
-    const chatModel = buildChatModel(cfg, callbacks)
+    const chatModel = buildChatModel({ ...cfg, enableThinking }, callbacks)
+    // 加载勾选技能的内容，注入系统提示，让 Agent 遵循技能规范
+    const skillContents = await loadSkillContents(skills)
+    const skillPrompts = [...skillContents.values()]
+    // MCP 工具：按请求传入的 mcpServers 配置加载（未启用/异常时为空数组，不影响对话）
+    const mcpTools = await loadMcpTools(mcpServers)
     if (projectRoot) {
-      await runAgent(chatModel, (messages || []).map(toLangchainMessage), projectRoot, res, perm, callbacks)
+      await runAgent(chatModel, (messages || []).map(toLangchainMessage), projectRoot, res, perm, callbacks, {
+        enabledTools,
+        skillPrompts,
+        mcpTools,
+      })
     } else {
-      // 无项目：直接流式补全
-      const msgs = [new SystemMessage(SYSTEM_PROMPT + effortHint), ...(messages || []).map(toLangchainMessage)]
+      // 无项目：文件工具依赖项目安全边界，仅注入技能提示做流式补全
+      const sysText = SYSTEM_PROMPT + effortHint + (skillPrompts.length ? '\n\n已启用技能规范：\n' + skillPrompts.join('\n\n---\n\n') : '')
+      const msgs = [new SystemMessage(sysText), ...(messages || []).map(toLangchainMessage)]
       const stream = await chatModel.stream(msgs, { callbacks })
       for await (const chunk of stream) {
+        const reasoning = chunk.additional_kwargs?.reasoning_content
+        if (typeof reasoning === 'string' && reasoning) {
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning } }] })}\n\n`)
+        }
         if (typeof chunk.content === 'string' && chunk.content) {
           res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk.content } }] })}\n\n`)
         }

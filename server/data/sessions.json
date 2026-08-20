@@ -45,9 +45,92 @@
           "durationMs": 5403,
           "status": "ok"
         }
+      },
+      {
+        "role": "user",
+        "content": "（请使用所选工具完成任务）",
+        "metadata": {
+          "timestamp": 1787194008431
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "您好！您提到\"请使用所选工具完成任务\"，但还没有告诉我具体需要完成什么任务。\n\n请描述一下您的需求，例如：\n\n- **查看项目结构**：列出某个目录下的文件\n- **读取文件**：查看某个文件的内容\n- **修改代码**：修复 bug、添加功能、重构代码\n- **创建文件**：新建脚本、配置文件等\n- **其他**：搜索代码、运行命令等\n\n请告诉我具体要做什么，我会立即用工具帮您处理。",
+        "metadata": {
+          "timestamp": 1787194013460,
+          "model": "qwen3.8-27b",
+          "tokens": 1564,
+          "durationMs": 5012,
+          "status": "ok"
+        }
+      },
+      {
+        "role": "user",
+        "content": "（请使用所选工具完成任务）",
+        "metadata": {
+          "timestamp": 1787194035758
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "您好！您连续两次提到\"请使用所选工具完成任务\"，但还没有告诉我**具体要完成什么任务**。\n\n请描述您的需求，例如：\n\n- 查看项目文件结构\n- 读取/修改某个文件\n- 创建新文件\n- 修复 bug 或添加功能\n- 搜索代码中的某个关键词\n\n请告诉我具体要做什么，我马上用工具帮您处理。",
+        "metadata": {
+          "timestamp": 1787194038602,
+          "model": "qwen3.8-27b",
+          "tokens": 1560,
+          "durationMs": 2826,
+          "status": "ok"
+        }
+      },
+      {
+        "role": "user",
+        "content": "帮我读一下 package.json",
+        "metadata": {
+          "timestamp": 1787194118644
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "<tool_call>\n<function=Read>\n<parameter=file_path>\n/app/package.json\n</parameter>\n</function>\n</tool_call>",
+        "metadata": {
+          "timestamp": 1787194120960,
+          "model": "qwen3.8-27b",
+          "tokens": 1534,
+          "durationMs": 2300,
+          "status": "ok"
+        }
+      },
+      {
+        "role": "user",
+        "content": "你是什么模型",
+        "metadata": {
+          "timestamp": 1787212062462
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "我是通义千问（Qwen），由阿里巴巴集团通义实验室自主研发的大语言模型。",
+        "reasoning": "用户再次询问“你是什么模型”。\n根据之前的回答，我应该保持一致，回答我是通义千问（Qwen），由阿里巴巴集团通义实验室研发。\n不需要使用工具。直接回答即可。\n",
+        "reasoningDone": true,
+        "toolCalls": [],
+        "metadata": {
+          "timestamp": 1787212063902,
+          "model": "qwen3.7-max-2026-05-17",
+          "tokens": 1522,
+          "durationMs": 1259,
+          "status": "ok"
+        }
       }
     ],
     "createdAt": 1787121767583,
-    "updatedAt": 1787136128209
+    "updatedAt": 1787212063907
+  },
+  {
+    "id": "s_mt18wd7dm4wr",
+    "projectId": "p_mt18jzsjag1r",
+    "title": "新对话",
+    "messages": [],
+    "createdAt": 1787213711065,
+    "updatedAt": 1787213711065
   }
 ]
