@@ -1,7 +1,13 @@
 import fs from 'fs'
 import fsp from 'fs/promises'
 import path from 'path'
+import { exec } from 'child_process'
+import { promisify } from 'util'
 import { tool } from '@langchain/core/tools'
+
+const execAsync = promisify(exec)
+// 命令输出截断上限，避免超大输出（如 build 日志）撑爆模型上下文
+const MAX_CMD_OUTPUT = 8000
 
 // 文件工具（严格限制在项目根目录内）
 export function safeResolve(root, rel) {
@@ -215,6 +221,64 @@ export function buildTools(root, permission = 'full', toolKeys) {
           type: 'object',
           properties: { pattern: { type: 'string', description: '正则表达式' } },
           required: ['pattern'],
+        },
+      }
+    ),
+    tool(
+      async ({ command, cwd = '.', timeout = 60000 }) => {
+        return writeGuard(async () => {
+          let workDir
+          try {
+            workDir = safeResolve(root, cwd || '.')
+          } catch (e) {
+            return '路径越界，无法在目录外执行命令: ' + String(e.message || e)
+          }
+          let ms = Number(timeout)
+          if (!Number.isFinite(ms) || ms <= 0) ms = 60000
+          ms = Math.min(ms, 5 * 60 * 1000) // 上限 5 分钟，防止卡死
+          try {
+            const { stdout, stderr } = await execAsync(command, {
+              cwd: workDir,
+              timeout: ms,
+              maxBuffer: 8 * 1024 * 1024,
+              windowsHide: true,
+            })
+            let out = ''
+            if (stdout) out += stdout
+            if (stderr) out += (out ? '\n[stderr]\n' : '') + stderr
+            if (!out.trim()) out = '(命令已执行，无输出)'
+            if (out.length > MAX_CMD_OUTPUT) {
+              out = out.slice(0, MAX_CMD_OUTPUT) + `\n… (输出已截断，原始共 ${out.length} 字符)`
+            }
+            return out
+          } catch (e) {
+            const code = e.code
+            const errOut = e.stdout || ''
+            const errErr = e.stderr || ''
+            let msg = `命令执行失败（退出码 ${code}）`
+            if (errOut) msg += '\n[stdout]\n' + errOut
+            if (errErr) msg += '\n[stderr]\n' + errErr
+            if (!errOut && !errErr) msg += '\n' + (e.message || String(e))
+            // 失败输出同样截断，避免异常日志撑爆上下文
+            if (msg.length > MAX_CMD_OUTPUT) {
+              msg = msg.slice(0, MAX_CMD_OUTPUT) + `\n… (输出已截断，原始共 ${msg.length} 字符)`
+            }
+            return msg
+          }
+        })
+      },
+      {
+        name: 'executeCommand',
+        description:
+          '在项目目录下执行 shell 命令，例如安装依赖(npm install)、运行测试(npm test)、构建(npm run build)、git 操作等。command 为完整命令；cwd 为相对项目根目录的工作目录，默认 "."；timeout 为超时毫秒（上限 5 分钟）。需要「完全访问」权限。注意：会真正执行命令，请谨慎使用。',
+        schema: {
+          type: 'object',
+          properties: {
+            command: { type: 'string', description: '要执行的完整 shell 命令' },
+            cwd: { type: 'string', description: '相对项目根目录的工作目录，默认 "."' },
+            timeout: { type: 'number', description: '超时毫秒数，默认 60000，上限 300000' },
+          },
+          required: ['command'],
         },
       }
     ),

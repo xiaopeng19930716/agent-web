@@ -16,6 +16,7 @@ import {
 } from '../sessions.js'
 import { settings, flattenVendors } from '../settings.js'
 import { fetchSkills } from '../api/agent.js'
+import { onBus, emitBus } from '../bus.js'
 import ChatLogDrawer from './ChatLogDrawer.vue'
 import ChatHeader from './chat/ChatHeader.vue'
 import MessageList from './chat/MessageList.vue'
@@ -271,6 +272,9 @@ async function init() {
 }
 
 onMounted(init)
+
+// 监听全局事件：侧边栏"添加项目"入口会触发 open-add-project
+onMounted(() => onBus('open-add-project', () => openAdd()))
 </script>
 
 <template>
@@ -298,9 +302,9 @@ onMounted(init)
     />
 
     <ChatLogDrawer
-      v-if="showLog"
-      :session-id="sessions.activeSessionId"
-      @close="showLog = false"
+      :open="showLog"
+      :session="activeSession"
+      @update:open="showLog = $event"
     />
   </div>
 </template>

@@ -3,7 +3,7 @@ import { ref, reactive, computed, nextTick, watch } from 'vue'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
-import { ChevronDown, ChevronUp, Check, Loader2 } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Check, Loader2, Copy } from 'lucide-vue-next'
 
 marked.setOptions({
   highlight(code, lang) {
@@ -20,12 +20,18 @@ const props = defineProps({
   error: { type: String, default: '' },
 })
 
-const expandedThinking = ref(false) // 思考区折叠摘要是否展开
 const scrollEl = ref(null)
 
 async function scrollToBottom() {
   await nextTick()
   if (scrollEl.value) scrollEl.value.scrollTop = scrollEl.value.scrollHeight
+}
+
+// 思考区展开/收起状态：按消息索引独立记录，避免一条展开全部联动
+const thinkingExpanded = reactive(new Set())
+function toggleThinking(i) {
+  if (thinkingExpanded.has(i)) thinkingExpanded.delete(i)
+  else thinkingExpanded.add(i)
 }
 
 function renderMarkdown(text) {
@@ -49,11 +55,39 @@ function clip(text, n = 1200) {
   return s.length > n ? s.slice(0, n) + `…（已截断，共 ${s.length} 字）` : s
 }
 
-// 工具结果展开/收起状态（以消息内索引为 key）
+// 工具结果展开/收起状态（以「消息索引-工具索引」为 key，避免跨消息联动）
 const resultExpanded = reactive(new Set())
-function toggleResult(ti) {
-  if (resultExpanded.has(ti)) resultExpanded.delete(ti)
-  else resultExpanded.add(ti)
+function resultKey(i, ti) {
+  return `${i}-${ti}`
+}
+function toggleResult(i, ti) {
+  const k = resultKey(i, ti)
+  if (resultExpanded.has(k)) resultExpanded.delete(k)
+  else resultExpanded.add(k)
+}
+
+// AI 气泡复制状态（按消息索引记录「已复制」反馈）
+const copiedSet = reactive(new Set())
+async function copyContent(i, text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.top = '-1000px'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    copiedSet.add(i)
+    setTimeout(() => copiedSet.delete(i), 2000)
+  } catch (e) {
+    console.error('复制失败', e)
+  }
 }
 
 // 取路径最后一级目录名
@@ -63,7 +97,19 @@ function lastSegment(p) {
   return parts.length ? parts[parts.length - 1] : p
 }
 
-watch(() => props.messages, scrollToBottom)
+// 流式生成时智能跟随：仅当用户已接近底部才自动滚到底部，避免打断主动上滚阅读
+function isNearBottom() {
+  const el = scrollEl.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 80
+}
+watch(
+  () => props.messages,
+  () => {
+    if (isNearBottom()) scrollToBottom()
+  },
+  { deep: true }
+)
 </script>
 
 <template>
@@ -87,64 +133,6 @@ watch(() => props.messages, scrollToBottom)
       class="msg"
       :class="m.role === 'user' ? 'msg--user' : 'msg--ai'"
     >
-      <!-- Agent 思考区：思考中 / 思考完成 + 工具调用时间线 -->
-      <div
-        v-if="m.role === 'assistant' && (m.reasoning || (m.toolCalls || []).length)"
-        class="thinking"
-        :class="{ 'thinking--collapsed': m.reasoningDone && !expandedThinking }"
-      >
-        <button class="thinking__head" @click="m.reasoningDone ? (expandedThinking = !expandedThinking) : null">
-          <span class="thinking__dot" :class="{ 'thinking__dot--done': m.reasoningDone }"></span>
-          <template v-if="!m.reasoningDone">
-            <span class="thinking__title">思考中</span>
-            <span class="thinking__dots"><i></i><i></i><i></i></span>
-          </template>
-          <template v-else>
-            <span class="thinking__title thinking__title--done">✓ 思考完成</span>
-            <span v-if="(m.toolCalls || []).length" class="thinking__summary">
-              已调用 {{ (m.toolCalls || []).length }} 个工具 · 用时思考
-            </span>
-            <ChevronDown v-if="!expandedThinking" :size="14" class="thinking__chevron" />
-            <ChevronUp v-else :size="14" class="thinking__chevron" />
-          </template>
-        </button>
-
-        <div v-show="!m.reasoningDone || expandedThinking" class="thinking__body">
-          <!-- 推理文本 -->
-          <div v-if="m.reasoning" class="thinking__reason">{{ m.reasoning }}</div>
-
-          <!-- 工具调用时间线 -->
-          <ul v-if="(m.toolCalls || []).length" class="timeline">
-            <li v-for="(t, ti) in (m.toolCalls || [])" :key="ti" class="timeline__item">
-              <span class="timeline__rail">
-                <span class="timeline__node" :class="{ 'timeline__node--done': t.status === 'done' }">
-                  <Check v-if="t.status === 'done'" :size="11" />
-                  <Loader2 v-else :size="11" class="timeline__spin" />
-                </span>
-              </span>
-              <div class="timeline__main">
-                <div class="timeline__head">
-                  <span class="timeline__icon">⚙</span>
-                  <span class="timeline__name">调用 {{ t.name }}</span>
-                  <span class="timeline__status" :class="{ 'timeline__status--done': t.status === 'done' }">
-                    {{ t.status === 'done' ? '完成' : '执行中' }}
-                  </span>
-                </div>
-                <div v-if="Object.keys(t.args || {}).length" class="timeline__args">
-                  {{ prettyArgs(t.args) }}
-                </div>
-                <div v-if="t.status === 'done' && t.result" class="timeline__result">
-                  <span class="timeline__result-label" @click="toggleResult(ti)">
-                    {{ resultExpanded.has(ti) ? '收起结果' : '查看结果' }}
-                  </span>
-                  <pre v-show="resultExpanded.has(ti)" class="timeline__result-body">{{ clip(t.result, 1200) }}</pre>
-                </div>
-              </div>
-            </li>
-          </ul>
-        </div>
-      </div>
-
       <!-- 气泡 -->
       <div class="bubble" :class="m.role === 'user' ? 'bubble--user' : 'bubble--ai'">
         <div v-if="m.role !== 'user'" class="bubble__avatar" aria-hidden="true">AI</div>
@@ -154,9 +142,85 @@ watch(() => props.messages, scrollToBottom)
         >{{ m.content }}</div>
         <div
           v-else
-          class="bubble__content"
-          v-html="renderMarkdown(m.content)"
-        ></div>
+          class="bubble__body"
+        >
+          <!-- Agent 思考区：放在 AI 对话框内部（白色卡片内） -->
+          <div
+            class="bubble__content"
+          >
+            <div
+              v-if="m.role === 'assistant' && (m.reasoning || (m.toolCalls || []).length)"
+              class="thinking thinking--nested"
+              :class="{ 'thinking--collapsed': m.reasoningDone && !thinkingExpanded.has(i) }"
+            >
+              <button class="thinking__head" @click="m.reasoningDone ? toggleThinking(i) : null">
+                <span class="thinking__dot" :class="{ 'thinking__dot--done': m.reasoningDone }"></span>
+                <template v-if="!m.reasoningDone">
+                  <span class="thinking__title">思考中</span>
+                  <span class="thinking__dots"><i></i><i></i><i></i></span>
+                </template>
+                <template v-else>
+                  <span class="thinking__title thinking__title--done">✓ 思考完成</span>
+                  <span v-if="(m.toolCalls || []).length" class="thinking__summary">
+                    已调用 {{ (m.toolCalls || []).length }} 个工具 · 用时思考
+                  </span>
+                  <ChevronDown v-if="!thinkingExpanded.has(i)" :size="14" class="thinking__chevron" />
+                  <ChevronUp v-else :size="14" class="thinking__chevron" />
+                </template>
+              </button>
+
+              <div v-show="thinkingExpanded.has(i)" class="thinking__body">
+                <!-- 推理文本 -->
+                <div v-if="m.reasoning" class="thinking__reason">{{ m.reasoning }}</div>
+
+                <!-- 工具调用时间线 -->
+                <ul v-if="(m.toolCalls || []).length" class="timeline">
+                  <li v-for="(t, ti) in (m.toolCalls || [])" :key="ti" class="timeline__item">
+                    <span class="timeline__rail">
+                      <span class="timeline__node" :class="{ 'timeline__node--done': t.status === 'done' }">
+                        <Check v-if="t.status === 'done'" :size="11" />
+                        <Loader2 v-else :size="11" class="timeline__spin" />
+                      </span>
+                    </span>
+                    <div class="timeline__main">
+                      <div class="timeline__head">
+                        <span class="timeline__icon">⚙</span>
+                        <span class="timeline__name">调用 {{ t.name }}</span>
+                        <span class="timeline__status" :class="{ 'timeline__status--done': t.status === 'done' }">
+                          {{ t.status === 'done' ? '完成' : '执行中' }}
+                        </span>
+                      </div>
+                      <div v-if="Object.keys(t.args || {}).length" class="timeline__args">
+                        {{ prettyArgs(t.args) }}
+                      </div>
+                      <div v-if="t.status === 'done' && t.result" class="timeline__result">
+                        <span class="timeline__result-label" @click="toggleResult(i, ti)">
+                          {{ resultExpanded.has(resultKey(i, ti)) ? '收起结果' : '查看结果' }}
+                        </span>
+                        <pre v-show="resultExpanded.has(resultKey(i, ti))" class="timeline__result-body">{{ clip(t.result, 1200) }}</pre>
+                      </div>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="bubble__markdown" v-html="renderMarkdown(m.content)"></div>
+
+            <button
+              class="bubble__copy bubble__copy--bottom"
+              :class="{ 'bubble__copy--done': copiedSet.has(i) }"
+              type="button"
+              :aria-label="copiedSet.has(i) ? '已复制' : '复制内容'"
+              :title="copiedSet.has(i) ? '已复制' : '复制'"
+              @click="copyContent(i, m.content)"
+            >
+              <Check v-if="copiedSet.has(i)" :size="13" />
+              <Copy v-else :size="13" />
+              <span class="bubble__copy-text">{{ copiedSet.has(i) ? '已复制' : '复制' }}</span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
     <div v-if="error" class="chat__error">{{ error }}</div>
@@ -236,6 +300,69 @@ watch(() => props.messages, scrollToBottom)
   font-size: 14px;
   word-break: break-word;
 }
+.bubble__body {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+.bubble__copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid @color-border;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.9);
+  color: @color-text-muted;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.15s ease, transform 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.bubble__body:hover .bubble__copy,
+.bubble__copy:focus-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.bubble__copy:hover {
+  color: @color-primary;
+  border-color: @color-primary;
+}
+.bubble__copy:active {
+  transform: scale(0.96);
+}
+.bubble__copy--done,
+.bubble__copy--done:hover {
+  color: #16a34a;
+  border-color: #16a34a;
+  opacity: 1;
+}
+.bubble__copy-text {
+  font-weight: 500;
+}
+/* 底部复制按钮：嵌入对话框底部，右对齐一行 */
+.bubble__copy--bottom {
+  position: static;
+  opacity: 1;
+  transform: none;
+  margin-top: 10px;
+  margin-left: auto;
+  width: fit-content;
+  background: transparent;
+  border-color: transparent;
+  color: @color-text-muted;
+}
+.bubble__copy--bottom:hover {
+  background: #f1f5f9;
+  border-color: @color-border;
+  transform: none;
+}
 .bubble--user .bubble__text {
   background: linear-gradient(135deg, @color-primary, @color-primary-hover);
   color: #fff;
@@ -278,6 +405,15 @@ watch(() => props.messages, scrollToBottom)
   padding: 10px 12px;
   animation: bubbleIn 0.16s ease-out;
   transition: background 0.2s, border-color 0.2s;
+}
+.thinking--nested {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  background: #f1f5f9;
+  border: none;
+  border-left: 3px solid @color-text-muted;
+  border-radius: 8px;
+  animation: none;
 }
 .thinking--collapsed {
   background: #f1f5f9;

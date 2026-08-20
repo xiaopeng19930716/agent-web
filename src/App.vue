@@ -13,7 +13,7 @@
 
       <nav class="conv-list">
         <template v-for="grp in groupedConversations" :key="grp.key">
-          <div class="conv-group__head">
+          <div v-if="grp.isProject" class="conv-group__head">
             <div class="conv-group__title">{{ grp.label }}</div>
             <div class="conv-group__actions">
               <span
@@ -40,6 +40,7 @@
             }"
             @click="selectSession(s.id)"
           >
+
             <MessageSquare :size="15" class="conv-item__icon" />
             <input
               v-if="editingConvId === s.id"
@@ -64,6 +65,14 @@
               title="删除对话"
               @click.stop.prevent="removeSession(s.id)"
             >×</span>
+          </button>
+          <button
+            v-if="!grp.isProject"
+            class="conv-group__addproject"
+            @click.stop.prevent="openAddProject"
+          >
+            <Plus :size="13" />
+            <span>添加项目</span>
           </button>
         </template>
 
@@ -92,6 +101,7 @@ import { RouterLink, RouterView, useRouter } from 'vue-router'
 import { Plus, Search, Settings, MessageSquare } from 'lucide-vue-next'
 import { projects, activeProjectId, removeProject } from './projects.js'
 import { createSession, fetchSessions, deleteSession, updateSession, sessions, NO_PROJECT_KEY } from './sessions.js'
+import { emitBus } from './bus.js'
 
 const router = useRouter()
 const keyword = ref('')
@@ -200,6 +210,15 @@ async function newProjectSession(pid) {
   activeProjectId.id = pid
   await createSession(pid)
   router.push('/chat')
+}
+
+// 通用对话分组下的"添加项目"入口：派发总线事件，由 ChatPanel 监听并打开弹窗
+function openAddProject() {
+  emitBus('open-add-project')
+  // 兜底：若 ChatPanel 还未挂载（极少见），则跳转 chat 路由后再触发一次
+  if (router.currentRoute.value.path !== '/chat') {
+    router.push('/chat').then(() => emitBus('open-add-project'))
+  }
 }
 
 // 侧边栏会话项双击改名
@@ -382,6 +401,29 @@ watch(
     background: #fee2e2;
     color: #dc2626;
   }
+}
+.conv-group__addproject {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 14px 6px;
+  padding: 6px 10px;
+  width: calc(100% - 28px);
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+  background: transparent;
+  color: @color-text-muted;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.conv-group__addproject:hover {
+  background: #eff6ff;
+  border-color: @color-primary;
+  color: @color-primary;
+}
+.conv-group__addproject svg {
+  flex-shrink: 0;
 }
 .conv-item {
   display: flex;
