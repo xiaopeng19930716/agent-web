@@ -1,0 +1,47 @@
+import { Router } from 'express'
+import { sessions, saveSessions } from '../lib/store.js'
+
+const router = Router()
+
+router.get('/sessions', (_req, res) => {
+  let list = [...sessions.values()]
+  list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+  res.json(list)
+})
+
+router.post('/sessions', (req, res) => {
+  const { projectId, title } = req.body || {}
+  const id = 's_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+  const now = Date.now()
+  const session = {
+    id,
+    projectId: projectId || '__none__',
+    title: title || '新对话',
+    messages: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+  sessions.set(id, session)
+  saveSessions()
+  res.json(session)
+})
+
+router.put('/sessions/:id', (req, res) => {
+  const s = sessions.get(req.params.id)
+  if (!s) return res.status(404).json({ error: '会话不存在' })
+  const { title, messages } = req.body || {}
+  if (typeof title === 'string') s.title = title
+  if (Array.isArray(messages)) s.messages = messages
+  s.updatedAt = Date.now()
+  sessions.set(s.id, s)
+  saveSessions()
+  res.json(s)
+})
+
+router.delete('/sessions/:id', (req, res) => {
+  const ok = sessions.delete(req.params.id)
+  if (ok) saveSessions()
+  res.json({ ok })
+})
+
+export default router
