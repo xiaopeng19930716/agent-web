@@ -1,9 +1,9 @@
 <script setup>
-import { ref, reactive, computed, nextTick, watch } from 'vue'
+import { ref, reactive, computed, nextTick, watch, onMounted } from 'vue'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
-import { ChevronDown, ChevronUp, Check, Loader2, Copy } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Check, Loader2, Copy, ArrowDown } from 'lucide-vue-next'
 
 marked.setOptions({
   highlight(code, lang) {
@@ -22,9 +22,23 @@ const props = defineProps({
 
 const scrollEl = ref(null)
 
-async function scrollToBottom() {
+// 是否显示「回到底部」悬浮按钮：仅当用户已上滚离开底部时显示
+const showToBottom = ref(false)
+
+function updateToBottom() {
+  showToBottom.value = !isNearBottom()
+}
+
+async function scrollToBottom(smooth = false) {
   await nextTick()
-  if (scrollEl.value) scrollEl.value.scrollTop = scrollEl.value.scrollHeight
+  if (scrollEl.value) {
+    scrollEl.value.scrollTo({ top: scrollEl.value.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+  }
+  updateToBottom()
+}
+
+function onScroll() {
+  updateToBottom()
 }
 
 // 思考区展开/收起状态：按消息索引独立记录，避免一条展开全部联动
@@ -107,132 +121,196 @@ watch(
   () => props.messages,
   () => {
     if (isNearBottom()) scrollToBottom()
+    else updateToBottom()
   },
   { deep: true }
 )
+
+// 挂载后初始化按钮可见性（例如刷新后内容很长且未停在底部）
+onMounted(updateToBottom)
 </script>
 
 <template>
-  <div class="chat__body" ref="scrollEl">
-    <div v-if="messages.length === 0" class="chat__empty">
-      <template v-if="active">
-        已连接到项目「{{ active.alias }}」<br />
-        <code class="chat__empty-path" :title="active.path">{{ lastSegment(active.path) }}</code><br />
-        让 Agent 帮你读代码、改 bug、加功能，例如：<br />
-        “列出 src 目录结构” / “在 App.vue 里加一个按钮”
-      </template>
-      <template v-else>
-        这是一个不关联任何项目的通用对话。<br />
-        直接提问即可；如需让 Agent 访问本地代码，点击输入框左侧「＋」添加并选择项目。
-      </template>
-    </div>
+  <div class="chat__scroll-wrap">
+    <div class="chat__body" ref="scrollEl" @scroll="onScroll">
+      <div v-if="messages.length === 0" class="chat__empty">
+        <template v-if="active">
+          已连接到项目「{{ active.alias }}」<br />
+          <code class="chat__empty-path" :title="active.path">{{ lastSegment(active.path) }}</code><br />
+          让 Agent 帮你读代码、改 bug、加功能，例如：<br />
+          “列出 src 目录结构” / “在 App.vue 里加一个按钮”
+        </template>
+        <template v-else>
+          这是一个不关联任何项目的通用对话。<br />
+          直接提问即可；如需让 Agent 访问本地代码，点击输入框左侧「＋」添加并选择项目。
+        </template>
+      </div>
 
-    <div
-      v-for="(m, i) in messages"
-      :key="i"
-      class="msg"
-      :class="m.role === 'user' ? 'msg--user' : 'msg--ai'"
-    >
-      <!-- 气泡 -->
-      <div class="bubble" :class="m.role === 'user' ? 'bubble--user' : 'bubble--ai'">
-        <div v-if="m.role !== 'user'" class="bubble__avatar" aria-hidden="true">AI</div>
-        <div
-          v-if="m.role === 'user'"
-          class="bubble__text"
-        >{{ m.content }}</div>
-        <div
-          v-else
-          class="bubble__body"
-        >
-          <!-- Agent 思考区：放在 AI 对话框内部（白色卡片内） -->
+      <div
+        v-for="(m, i) in messages"
+        :key="i"
+        class="msg"
+        :class="m.role === 'user' ? 'msg--user' : 'msg--ai'"
+      >
+        <!-- 气泡 -->
+        <div class="bubble" :class="m.role === 'user' ? 'bubble--user' : 'bubble--ai'">
+          <div v-if="m.role !== 'user'" class="bubble__avatar" aria-hidden="true">AI</div>
           <div
-            class="bubble__content"
+            v-if="m.role === 'user'"
+            class="bubble__text"
+          >{{ m.content }}</div>
+          <div
+            v-else
+            class="bubble__body"
           >
+            <!-- Agent 思考区：放在 AI 对话框内部（白色卡片内） -->
             <div
-              v-if="m.role === 'assistant' && (m.reasoning || (m.toolCalls || []).length)"
-              class="thinking thinking--nested"
-              :class="{ 'thinking--collapsed': m.reasoningDone && !thinkingExpanded.has(i) }"
+              class="bubble__content"
             >
-              <button class="thinking__head" @click="m.reasoningDone ? toggleThinking(i) : null">
-                <span class="thinking__dot" :class="{ 'thinking__dot--done': m.reasoningDone }"></span>
-                <template v-if="!m.reasoningDone">
-                  <span class="thinking__title">思考中</span>
-                  <span class="thinking__dots"><i></i><i></i><i></i></span>
-                </template>
-                <template v-else>
-                  <span class="thinking__title thinking__title--done">✓ 思考完成</span>
-                  <span v-if="(m.toolCalls || []).length" class="thinking__summary">
-                    已调用 {{ (m.toolCalls || []).length }} 个工具 · 用时思考
-                  </span>
-                  <ChevronDown v-if="!thinkingExpanded.has(i)" :size="14" class="thinking__chevron" />
-                  <ChevronUp v-else :size="14" class="thinking__chevron" />
-                </template>
-              </button>
-
-              <div v-show="thinkingExpanded.has(i)" class="thinking__body">
-                <!-- 推理文本 -->
-                <div v-if="m.reasoning" class="thinking__reason">{{ m.reasoning }}</div>
-
-                <!-- 工具调用时间线 -->
-                <ul v-if="(m.toolCalls || []).length" class="timeline">
-                  <li v-for="(t, ti) in (m.toolCalls || [])" :key="ti" class="timeline__item">
-                    <span class="timeline__rail">
-                      <span class="timeline__node" :class="{ 'timeline__node--done': t.status === 'done' }">
-                        <Check v-if="t.status === 'done'" :size="11" />
-                        <Loader2 v-else :size="11" class="timeline__spin" />
-                      </span>
+              <div
+                v-if="m.role === 'assistant' && (m.reasoning || (m.toolCalls || []).length)"
+                class="thinking thinking--nested"
+                :class="{ 'thinking--collapsed': m.reasoningDone && !thinkingExpanded.has(i) }"
+              >
+                <button class="thinking__head" @click="m.reasoningDone ? toggleThinking(i) : null">
+                  <span class="thinking__dot" :class="{ 'thinking__dot--done': m.reasoningDone }"></span>
+                  <template v-if="!m.reasoningDone">
+                    <span class="thinking__title">思考中</span>
+                    <span class="thinking__dots"><i></i><i></i><i></i></span>
+                  </template>
+                  <template v-else>
+                    <span class="thinking__title thinking__title--done">✓ 思考完成</span>
+                    <span v-if="(m.toolCalls || []).length" class="thinking__summary">
+                      已调用 {{ (m.toolCalls || []).length }} 个工具 · 用时思考
                     </span>
-                    <div class="timeline__main">
-                      <div class="timeline__head">
-                        <span class="timeline__icon">⚙</span>
-                        <span class="timeline__name">调用 {{ t.name }}</span>
-                        <span class="timeline__status" :class="{ 'timeline__status--done': t.status === 'done' }">
-                          {{ t.status === 'done' ? '完成' : '执行中' }}
+                    <ChevronDown v-if="!thinkingExpanded.has(i)" :size="14" class="thinking__chevron" />
+                    <ChevronUp v-else :size="14" class="thinking__chevron" />
+                  </template>
+                </button>
+
+                <div v-show="thinkingExpanded.has(i)" class="thinking__body">
+                  <!-- 推理文本 -->
+                  <div v-if="m.reasoning" class="thinking__reason">{{ m.reasoning }}</div>
+
+                  <!-- 工具调用时间线 -->
+                  <ul v-if="(m.toolCalls || []).length" class="timeline">
+                    <li v-for="(t, ti) in (m.toolCalls || [])" :key="ti" class="timeline__item">
+                      <span class="timeline__rail">
+                        <span class="timeline__node" :class="{ 'timeline__node--done': t.status === 'done' }">
+                          <Check v-if="t.status === 'done'" :size="11" />
+                          <Loader2 v-else :size="11" class="timeline__spin" />
                         </span>
+                      </span>
+                      <div class="timeline__main">
+                        <div class="timeline__head">
+                          <span class="timeline__icon">⚙</span>
+                          <span class="timeline__name">调用 {{ t.name }}</span>
+                          <span class="timeline__status" :class="{ 'timeline__status--done': t.status === 'done' }">
+                            {{ t.status === 'done' ? '完成' : '执行中' }}
+                          </span>
+                        </div>
+                        <div v-if="Object.keys(t.args || {}).length" class="timeline__args">
+                          {{ prettyArgs(t.args) }}
+                        </div>
+                        <div v-if="t.status === 'done' && t.result" class="timeline__result">
+                          <span class="timeline__result-label" @click="toggleResult(i, ti)">
+                            {{ resultExpanded.has(resultKey(i, ti)) ? '收起结果' : '查看结果' }}
+                          </span>
+                          <pre v-show="resultExpanded.has(resultKey(i, ti))" class="timeline__result-body">{{ clip(t.result, 1200) }}</pre>
+                        </div>
                       </div>
-                      <div v-if="Object.keys(t.args || {}).length" class="timeline__args">
-                        {{ prettyArgs(t.args) }}
-                      </div>
-                      <div v-if="t.status === 'done' && t.result" class="timeline__result">
-                        <span class="timeline__result-label" @click="toggleResult(i, ti)">
-                          {{ resultExpanded.has(resultKey(i, ti)) ? '收起结果' : '查看结果' }}
-                        </span>
-                        <pre v-show="resultExpanded.has(resultKey(i, ti))" class="timeline__result-body">{{ clip(t.result, 1200) }}</pre>
-                      </div>
-                    </div>
-                  </li>
-                </ul>
+                    </li>
+                  </ul>
+                </div>
               </div>
+
+              <div class="bubble__markdown" v-html="renderMarkdown(m.content)"></div>
+
+              <button
+                class="bubble__copy bubble__copy--bottom"
+                :class="{ 'bubble__copy--done': copiedSet.has(i) }"
+                type="button"
+                :aria-label="copiedSet.has(i) ? '已复制' : '复制内容'"
+                :title="copiedSet.has(i) ? '已复制' : '复制'"
+                @click="copyContent(i, m.content)"
+              >
+                <Check v-if="copiedSet.has(i)" :size="13" />
+                <Copy v-else :size="13" />
+                <span class="bubble__copy-text">{{ copiedSet.has(i) ? '已复制' : '复制' }}</span>
+              </button>
             </div>
-
-            <div class="bubble__markdown" v-html="renderMarkdown(m.content)"></div>
-
-            <button
-              class="bubble__copy bubble__copy--bottom"
-              :class="{ 'bubble__copy--done': copiedSet.has(i) }"
-              type="button"
-              :aria-label="copiedSet.has(i) ? '已复制' : '复制内容'"
-              :title="copiedSet.has(i) ? '已复制' : '复制'"
-              @click="copyContent(i, m.content)"
-            >
-              <Check v-if="copiedSet.has(i)" :size="13" />
-              <Copy v-else :size="13" />
-              <span class="bubble__copy-text">{{ copiedSet.has(i) ? '已复制' : '复制' }}</span>
-            </button>
           </div>
         </div>
       </div>
+      <div v-if="error" class="chat__error">{{ error }}</div>
     </div>
-    <div v-if="error" class="chat__error">{{ error }}</div>
+
+    <!-- 一键回到底部：用户上滚离开底部时浮现 -->
+    <transition name="to-bottom-fade">
+      <button
+        v-if="showToBottom"
+        class="chat__to-bottom"
+        type="button"
+        aria-label="回到底部"
+        title="回到底部"
+        @click="scrollToBottom(true)"
+      >
+        <ArrowDown :size="18" />
+      </button>
+    </transition>
   </div>
 </template>
 
 <style scoped lang="less">
+.chat__scroll-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
 .chat__body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 22px;
   background: #ffffff;
+}
+.chat__to-bottom {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid @color-border;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.15);
+  color: @color-primary;
+  cursor: pointer;
+  z-index: 5;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.chat__to-bottom:hover {
+  color: #fff;
+  background: @color-primary;
+  border-color: @color-primary;
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.35);
+  transform: translateY(-1px);
+}
+.chat__to-bottom:active {
+  transform: scale(0.94);
+}
+.to-bottom-fade-enter-active,
+.to-bottom-fade-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.to-bottom-fade-enter-from,
+.to-bottom-fade-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
 }
 .chat__empty {
   color: #64748b;
