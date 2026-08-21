@@ -158,7 +158,19 @@ onMounted(updateToBottom)
           <div
             v-if="m.role === 'user'"
             class="bubble__text"
-          >{{ m.content }}</div>
+          >
+            <template v-if="m.tags && m.tags.length">
+              <template v-for="(t, ti) in m.tags" :key="ti">
+                <span v-if="t.type === 'text'">{{ t.text }}</span>
+                <span
+                  v-else
+                  class="token-chip"
+                  :class="`token-chip--${t.kind}`"
+                >{{ t.kind === 'mcp' ? '⌘/' : (t.kind === 'skill' ? '/' : (t.kind === 'tool' ? '/' : '@')) }}{{ t.label }}</span>
+              </template>
+            </template>
+            <template v-else>{{ m.content }}</template>
+          </div>
           <div
             v-else
             class="bubble__body"
@@ -230,9 +242,10 @@ onMounted(updateToBottom)
                 class="bubble__copy bubble__copy--bottom"
                 :class="{ 'bubble__copy--done': copiedSet.has(i) }"
                 type="button"
+                :disabled="m.done === false"
                 :aria-label="copiedSet.has(i) ? '已复制' : '复制内容'"
-                :title="copiedSet.has(i) ? '已复制' : '复制'"
-                @click="copyContent(i, m.content)"
+                :title="m.done === false ? '思考/生成中，完成后可复制' : (copiedSet.has(i) ? '已复制' : '复制')"
+                @click="m.done !== false && copyContent(i, m.content)"
               >
                 <Check v-if="copiedSet.has(i)" :size="13" />
                 <Copy v-else :size="13" />
@@ -441,11 +454,46 @@ onMounted(updateToBottom)
   border-color: @color-border;
   transform: none;
 }
+.bubble__copy:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: @color-text-muted;
+  pointer-events: none;
+}
 .bubble--user .bubble__text {
   background: linear-gradient(135deg, @color-primary, @color-primary-hover);
   color: #fff;
   border-bottom-right-radius: 5px;
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.25);
+}
+/* 用户气泡内的工具/技能/MCP/文件标记：样式化 chip（不随\n换行） */
+.token-chip {
+  display: inline-block;
+  vertical-align: baseline;
+  margin: 0 3px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: 'Fira Code', Consolas, monospace;
+  line-height: 1.6;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  color: #fff;
+}
+.token-chip--mcp {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: #ffd591;
+  color: #fff7e6;
+}
+.token-chip--skill {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+.token-chip--tool {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.45);
 }
 .bubble--ai .bubble__content {
   background: #ffffff;

@@ -1,13 +1,14 @@
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
 import { Cpu, Cable, Puzzle, ArrowLeft } from 'lucide-vue-next'
+import { sessions } from '../sessions.js'
 
 const route = useRoute()
 const router = useRouter()
 
-// 返回对话页
+// 返回对话页，带上当前活动会话 ID
 function goChat() {
-  router.push('/chat')
+  router.push(sessions.activeSessionId ? `/chat/${sessions.activeSessionId}` : '/chat')
 }
 
 const subMenus = [
@@ -20,7 +21,8 @@ const isActive = (key) => route.path.endsWith(`/${key}`) || route.path === `/set
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col">
+  <transition name="settings-fade" appear>
+    <div class="flex h-full min-h-0 flex-col">
     <!-- 顶部子菜单 -->
     <header class="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-2">
       <button
@@ -50,4 +52,22 @@ const isActive = (key) => route.path.endsWith(`/${key}`) || route.path === `/set
       <router-view />
     </div>
   </div>
+  </transition>
 </template>
+
+<style scoped>
+.settings-fade-enter-active {
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+.settings-fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.settings-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.settings-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+</style>

@@ -13,7 +13,7 @@ export const projects = new Map()
 // 会话存储（按项目归属，持久化对话消息）
 export const NO_PROJECT_KEY = '__none__'
 export const SESSIONS_FILE = join(DATA_DIR, 'sessions.json')
-/** @type {Map<string, {id:string, projectId:string, title:string, messages:any[], createdAt:number, updatedAt:number}>} */
+/** @type {Map<string, {id:string, projectId:string, title:string, messages:any[], createdAt:number, updatedAt:number, archived?:boolean}>} */
 export const sessions = new Map()
 
 export function loadProjects() {
@@ -48,16 +48,16 @@ export function saveSessions() {
   fs.writeFileSync(SESSIONS_FILE, JSON.stringify([...sessions.values()], null, 2))
 }
 
-// 级联删除某项目下的所有会话（供 projects 路由删除时调用）
+// 级联归档某项目下的所有会话（供 projects 路由删除时调用）：软删除，保留数据
 export function deleteSessionsByProject(projectId) {
-  let removed = false
+  let changed = false
   for (const [sid, s] of [...sessions.entries()]) {
     if ((s.projectId || NO_PROJECT_KEY) === projectId) {
-      sessions.delete(sid)
-      removed = true
+      s.archived = true
+      changed = true
     }
   }
-  if (removed) saveSessions()
+  if (changed) saveSessions()
 }
 
 export function initStores() {

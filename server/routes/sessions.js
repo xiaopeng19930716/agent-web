@@ -29,9 +29,11 @@ router.post('/sessions', (req, res) => {
 router.put('/sessions/:id', (req, res) => {
   const s = sessions.get(req.params.id)
   if (!s) return res.status(404).json({ error: '会话不存在' })
-  const { title, messages } = req.body || {}
+  const { title, messages, archived } = req.body || {}
   if (typeof title === 'string') s.title = title
   if (Array.isArray(messages)) s.messages = messages
+  // 归档标记：true 表示归档（软删除），数据保留在 sessions.json
+  if (typeof archived === 'boolean') s.archived = archived
   s.updatedAt = Date.now()
   sessions.set(s.id, s)
   saveSessions()

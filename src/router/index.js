@@ -3,7 +3,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 const routes = [
   { path: '/', redirect: '/chat' },
   {
-    path: '/chat',
+    path: '/chat/:sessionId?',
     name: 'chat',
     component: () => import('../components/ChatPanel.vue'),
   },

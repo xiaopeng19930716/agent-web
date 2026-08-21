@@ -7,9 +7,12 @@ import { config } from 'dotenv'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 config({ path: join(__dirname, '..', '..', '.env') })
 
+// 百炼云兼容 baseURL 作为供应商的默认地址（当用户未自定义 baseURL 时回退）
 export const DASHSCOPE_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-export const API_KEY = process.env.DASHSCOPE_API_KEY
-export const DEFAULT_MODEL = process.env.DASHSCOPE_MODEL || 'qwen-coder-plus'
+// 注意：API Key / 模型 URL 一律由用户在设置面板写入服务端配置文件（~/.code-agent/models.json），
+// 不读取环境变量，避免密钥泄露。以下默认值仅为回退，不来自 .env。
+export const API_KEY = ''
+export const DEFAULT_MODEL = 'qwen-coder-plus'
 export const PORT = process.env.PORT || 3001
 
 // 用户全局配置（持久化到用户主目录，避免存于浏览器 localStorage）
