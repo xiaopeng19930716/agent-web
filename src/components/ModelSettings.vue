@@ -56,8 +56,10 @@ const allVendors = computed(() => [
 const activeKey = ref(PRESET_VENDORS[0].key)
 const activeVendor = computed(() => allVendors.value.find((v) => v.key === activeKey.value) || allVendors.value[0])
 const isNew = computed(() => activeKey.value === '__new__')
+// 是否为预置供应商：key 与名称均只读，不可修改（防止被改名导致数据丢失 / 孤儿残留）
+const isPreset = computed(() => !isNew.value && !activeVendor.value?.isCustomVendor)
 
-// 预置供应商 key 集合（用于唯一性校验：自定义供应商 Key 不得与预置冲突）
+// 预置供应商 key 集合（作为保留命名空间：自定义供应商 Key 不得与之重复，即使该预置未注入 settings.vendors）
 const PRESET_VENDOR_KEYS = new Set(PRESET_VENDORS.map((v) => v.key))
 
 const emptyRow = () => ({ name: '', id: '', maxTokens: '', temperature: 0.3 })
@@ -157,15 +159,17 @@ async function save() {
     message.error('供应商 Key 不能为空')
     return
   }
-  // 唯一性校验：不得与预置供应商或其他自定义供应商重复（排除自身旧 key）
+  // 唯一性校验：供应商 Key 不得与任何已存在的供应商（预置 + 自定义）重复，排除自身旧 Key。
+  // 已存在集合 = settings.vendors 的全量 key ∪ 预置供应商 key（预置作为保留命名空间，即使未注入 settings.vendors 也不可占用）。
   const conflict = !isNew.value && newKey !== oldKey
-  if (isNew.value && (PRESET_VENDOR_KEYS.has(newKey) || settings.customVendors.some((v) => v.key === newKey))) {
-    message.error('供应商 Key 已存在，请更换')
-    return
-  }
-  if (conflict && (PRESET_VENDOR_KEYS.has(newKey) || settings.customVendors.some((v) => v.key === newKey && v.key !== oldKey))) {
-    message.error('供应商 Key 已存在，请更换')
-    return
+  if (isNew.value || conflict) {
+    const exists =
+      Object.keys(settings.vendors).some((k) => k === newKey && k !== oldKey) ||
+      (PRESET_VENDOR_KEYS.has(newKey) && newKey !== oldKey)
+    if (exists) {
+      message.error(`供应商 Key「${newKey}」已存在，请更换为唯一标识`)
+      return
+    }
   }
   const rows = form.modelRows.filter((r) => r.id.trim())
   if (!rows.length) {
@@ -188,10 +192,16 @@ async function save() {
     }
     const cv = settings.customVendors.find((v) => v.key === oldKey)
     if (cv) cv.key = newKey
+    // disabledVendors 与 configuredVendors 同步（避免改名后旧 key 残留成孤儿引用）
     const di = settings.disabledVendors.indexOf(oldKey)
     if (di >= 0) {
       settings.disabledVendors.splice(di, 1)
       if (!settings.disabledVendors.includes(newKey)) settings.disabledVendors.push(newKey)
+    }
+    const ci = settings.configuredVendors.indexOf(oldKey)
+    if (ci >= 0) {
+      settings.configuredVendors.splice(ci, 1)
+      if (!settings.configuredVendors.includes(newKey)) settings.configuredVendors.push(newKey)
     }
     // activeModel 组合键同步
     if (settings.activeModel.startsWith(oldKey + '/')) {
@@ -213,7 +223,8 @@ async function save() {
   }
   // 写入该供应商对象（标准格式）
   const vCfg = settings.vendors[newKey]
-  vCfg.name = form.name.trim()
+  // 预置供应商名称只读，保持预置名；仅自定义供应商使用表单填写的名称
+  vCfg.name = isPreset ? (activeVendor.value?.name || newKey) : form.name.trim()
   vCfg.npm = platformToNpm(form.platform)
   vCfg.options = { apiKey: form.apiKey.trim(), baseURL: form.baseUrl.trim() }
   // 用表单中现有的 model id 集合决定要删哪些、保留哪些
@@ -409,7 +420,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
               v-model:value="form.name"
               placeholder="如：我的私有服务"
               size="middle"
-              :disabled="!editing"
+              :disabled="!editing || isPreset"
             />
           </label>
           <label class="block">
@@ -428,9 +439,9 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
             v-model:value="form.vendorKey"
             placeholder="如：my-llm-service（唯一标识，用于获取模型列表）"
             size="middle"
-            :disabled="!editing"
+            :disabled="!editing || isPreset"
           />
-          <span class="text-[11px] text-gray-400 mt-1 block">{{ isNew ? '自定义供应商需手动填写 Key，保存后不可修改' : '预置 / 已保存供应商的 Key 不可修改' }}</span>
+          <span class="text-[11px] text-gray-400 mt-1 block">{{ isNew ? '自定义供应商需手动填写 Key，保存后不可修改' : isPreset ? '预置供应商的 Key 与名称只读，不可修改' : '已保存的自定义供应商 Key 不可修改' }}</span>
         </label>
         <label class="block">
           <span class="block text-xs font-semibold text-gray-700 mb-1">Base URL</span>

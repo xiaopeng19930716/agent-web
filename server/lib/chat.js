@@ -6,8 +6,42 @@ import {
   ToolMessage,
 } from '@langchain/core/messages'
 import { BaseCallbackHandler } from '@langchain/core/callbacks/base'
-import { DASHSCOPE_BASE, API_KEY, DEFAULT_MODEL } from './config.js'
+import { DASHSCOPE_BASE, API_KEY, DEFAULT_MODEL, MODELS_FILE, readConfigFile } from './config.js'
 import { buildTools } from './fileTools.js'
+
+// 从服务端持久化的 models.json 解析指定模型的密钥与 baseURL，
+// 避免前端在 /chat 请求中明文传递 apiKey。密钥完全来自用户配置，不读取环境变量。
+// 注意：磁盘格式是控制字段（activeModel/configuredVendors/disabledVendors）与顶层 vendorKey
+// 平铺，不是嵌套在 vendors 字段里。vendor 对象自身的 name/npm/options/models 也可能是直接数据。
+export function resolveModelConfig(modelKey) {
+  const fallback = { apiKey: '', baseURL: DASHSCOPE_BASE }
+  if (!modelKey || typeof modelKey !== 'string') return fallback
+  const data = readConfigFile(MODELS_FILE)
+  if (!data) return fallback
+  let vk, mk
+  if (modelKey.includes('/')) {
+    [vk, mk] = modelKey.split('/')
+  } else {
+    // 兼容纯 modelId：扫描所有 vendor，匹配第一个含该 modelId 的
+    for (const k of Object.keys(data)) {
+      if (['activeModel', 'configuredVendors', 'disabledVendors', 'customVendors'].includes(k)) continue
+      const v = data[k]
+      if (v && v.models && v.models[modelKey]) {
+        vk = k
+        mk = modelKey
+        break
+      }
+    }
+    if (!vk) return fallback
+  }
+  const vendor = data[vk]
+  if (!vendor) return fallback
+  const model = (vendor.models && vendor.models[mk]) || {}
+  const apiKey = model.apiKey || (vendor.options && vendor.options.apiKey) || ''
+  const baseURL =
+    model.baseUrl || (vendor.options && vendor.options.baseURL) || DASHSCOPE_BASE
+  return { apiKey, baseURL }
+}
 
 // 系统提示词
 export const SYSTEM_PROMPT = `你是一个资深的全栈编程助手（Code Agent），正在操作一个本地项目。
@@ -20,9 +54,14 @@ export const SYSTEM_PROMPT = `你是一个资深的全栈编程助手（Code Age
 6. 保持聚焦，避免冗余寒暄。`
 
 export function buildChatModel(cfg, callbacks) {
-  const baseUrl = (cfg.baseUrl || DASHSCOPE_BASE).replace(/\/$/, '')
-  const apiKey = cfg.apiKey || API_KEY
-  const model = cfg.model || DEFAULT_MODEL
+  const modelKey = cfg.model || DEFAULT_MODEL
+  // 密钥优先从服务端配置解析（不依赖前端明文）；仅当服务端无配置时回退前端传入
+  const resolved = resolveModelConfig(modelKey)
+  // 密钥仅来自服务端配置文件（用户设置面板），不再回退到环境变量或前端明文
+  const apiKey = resolved.apiKey || cfg.apiKey
+  const baseUrl = (cfg.baseUrl || resolved.baseURL || DASHSCOPE_BASE).replace(/\/$/, '')
+  // 传给模型的必须是纯模型名（组合键 "vendor/modelId" 需去掉 vendor 前缀）
+  const model = modelKey.includes('/') ? modelKey.split('/').slice(1).join('/') : modelKey
   const temperature = typeof cfg.temperature === 'number' ? cfg.temperature : 0.3
   const maxTokens =
     typeof cfg.maxTokens === 'number' && cfg.maxTokens > 0 ? cfg.maxTokens : undefined

@@ -190,22 +190,20 @@ async function send(payload) {
     .filter((m) => m !== assistant)
     .map((m) => ({ role: m.role, content: m.content }))
 
-  // activeModel 为组合键 "vendorKey/modelId"
-  const activeModelId = settings.activeModel.includes('/') ? settings.activeModel.split('/')[1] : settings.activeModel
+  // activeModel 为组合键 "vendorKey/modelId"，作为模型标识传给后端以定位密钥，
+  // 密钥由后端从服务端配置解析，前端不再传递 apiKey 明文
+  const activeModelKey = settings.activeModel // 组合键 vendorKey/modelId
+  const activeModelId = activeModelKey.includes('/') ? activeModelKey.split('/')[1] : activeModelKey
   const modelId = (pid && active.value.modelId) || activeModelId
   const flat = flattenVendors(settings.vendors)
   const modelObj = flat.find((m) => m.id === modelId) || {}
-  const effectiveBaseUrl = modelObj.baseUrl?.trim() || settings.baseUrl
-  const effectiveApiKey = (modelObj.apiKey && modelObj.apiKey.trim()) || settings.apiKey
 
   // 工具调用时间线：按 id/name 维护进行中的条目
   const toolRunById = new Map()
 
   await streamChat(history, {
     config: {
-      baseUrl: effectiveBaseUrl,
-      apiKey: effectiveApiKey,
-      model: modelId,
+      model: activeModelKey, // 发送组合键，便于后端解析 apiKey
       temperature: typeof modelObj.temperature === 'number' ? modelObj.temperature : 0.3,
       maxTokens: modelObj.maxTokens || undefined,
     },

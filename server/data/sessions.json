@@ -270,7 +270,8 @@
       }
     ],
     "createdAt": 1787121767583,
-    "updatedAt": 1787231347542
+    "updatedAt": 1787304644930,
+    "archived": true
   },
   {
     "id": "s_mt1h7fgwmm6u",
@@ -323,7 +324,8 @@
       }
     ],
     "createdAt": 1787227664144,
-    "updatedAt": 1787235524975
+    "updatedAt": 1787304932627,
+    "archived": true
   },
   {
     "id": "s_mt1hrr6dglpk",
@@ -500,7 +502,8 @@
       }
     ],
     "createdAt": 1787228612437,
-    "updatedAt": 1787296477977
+    "updatedAt": 1787304640468,
+    "archived": true
   },
   {
     "id": "s_mt2necvfz51g",
@@ -508,7 +511,8 @@
     "title": "新对话",
     "messages": [],
     "createdAt": 1787298531243,
-    "updatedAt": 1787298531243
+    "updatedAt": 1787304638977,
+    "archived": true
   },
   {
     "id": "s_mt2oa6i3610v",
@@ -581,7 +585,8 @@
       }
     ],
     "createdAt": 1787300015979,
-    "updatedAt": 1787300495874
+    "updatedAt": 1787304635946,
+    "archived": true
   },
   {
     "id": "s_mt2olj9nnfjd",
@@ -646,7 +651,8 @@
       }
     ],
     "createdAt": 1787300545739,
-    "updatedAt": 1787302497654
+    "updatedAt": 1787304634179,
+    "archived": true
   },
   {
     "id": "s_mt2olxtyw1j5",
@@ -711,6 +717,175 @@
       }
     ],
     "createdAt": 1787300564614,
-    "updatedAt": 1787300727744
+    "updatedAt": 1787304635279,
+    "archived": true
+  },
+  {
+    "id": "s_mt2r6rq7osfb",
+    "projectId": "__none__",
+    "title": "你好",
+    "messages": [
+      {
+        "role": "user",
+        "content": "你好",
+        "tags": [
+          {
+            "type": "text",
+            "text": "你好"
+          }
+        ],
+        "metadata": {
+          "timestamp": 1787304905053
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "你好！我是你的全栈编程助手。请问有什么项目问题或代码需求需要我帮忙处理？你可以告诉我具体的任务，比如阅读代码、修改 Bug、添加新功能或是运行测试。",
+        "reasoning": "用户说“你好”，这是一个简单的问候。\n作为资深全栈编程助手，我应该礼貌地回应，并询问用户有什么具体的编程问题或项目需求需要我帮忙。\n\n思考过程：\n1. 识别意图：打招呼。\n2. 确定角色：资深全栈编程助手（Code Agent）。\n3. 制定回复：简短问候，表明身份，询问需求。保持专业、聚焦，避免冗余寒暄。\n\n回复内容：\n你好！我是你的全栈编程助手。请问有什么项目问题或代码需求需要我帮忙处理？你可以告诉我具体的任务，比如阅读代码、修改bug、添加新功能或是运行测试。\n",
+        "reasoningDone": true,
+        "done": true,
+        "toolCalls": [],
+        "metadata": {
+          "timestamp": 1787304907004,
+          "model": "qwen3.7-max-2026-05-17",
+          "tokens": 666,
+          "durationMs": 1937,
+          "status": "ok"
+        }
+      }
+    ],
+    "createdAt": 1787304895711,
+    "updatedAt": 1787304911565,
+    "archived": true
+  },
+  {
+    "id": "s_mt2r7wo3q7tq",
+    "projectId": "p_mt1giba3gs87",
+    "title": "新对话",
+    "messages": [],
+    "createdAt": 1787304948771,
+    "updatedAt": 1787304948771,
+    "archived": true
+  },
+  {
+    "id": "s_mt2rum3fhzlf",
+    "projectId": "__none__",
+    "title": "你好",
+    "messages": [
+      {
+        "role": "user",
+        "content": "你好",
+        "tags": [
+          {
+            "type": "text",
+            "text": "你好"
+          }
+        ],
+        "metadata": {
+          "timestamp": 1787306017165
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "你好！我是你的全栈编程助手。请问有什么我可以帮你的？无论是前端、后端、数据库还是项目部署的问题，都可以告诉我。如果有具体的项目代码需要查看或修改，请随时指示。",
+        "reasoning": "用户说“你好”，这是一个简单的问候。\n作为资深全栈编程助手，我应该礼貌地回应，并询问用户有什么具体的编程问题或项目需求需要我帮忙。\n\n思考过程：\n1. 识别用户意图：打招呼。\n2. 确定回复策略：友好回应，表明身份，询问需求。\n3. 遵循规则：保持聚焦，避免冗余寒暄，使用简体中文。\n\n回复内容：\n你好！我是你的全栈编程助手。请问有什么我可以帮你的？无论是前端、后端、数据库还是项目部署的问题，都可以告诉我。如果有具体的项目需要查看或修改，请随时指示。",
+        "reasoningDone": true,
+        "done": true,
+        "toolCalls": [],
+        "metadata": {
+          "timestamp": 1787306019186,
+          "model": "qwen3.7-max-2026-05-17",
+          "tokens": 664,
+          "durationMs": 2008,
+          "status": "ok"
+        }
+      },
+      {
+        "role": "user",
+        "content": "hi",
+        "tags": [
+          {
+            "type": "text",
+            "text": "hi"
+          }
+        ],
+        "metadata": {
+          "timestamp": 1787306890764
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "你好！随时准备协助你处理代码和项目问题。请问今天需要做什么？",
+        "reasoning": "用户只是简单地打了个招呼 \"hi\"。\n作为全栈编程助手，我应该保持专业、简洁，并引导用户提出具体的技术问题或项目需求。\n\n思考过程：\n1. 确认用户意图：打招呼，可能还在思考要问什么，或者只是测试。\n2. 制定回复策略：简短回应，再次表明身份和可提供的帮助，鼓励用户提出具体问题。\n3. 遵循规则：保持聚焦，避免冗余寒暄，使用简体中文。\n\n回复内容：\n\"你好！请问有什么编程或项目相关的问题需要我帮忙解决吗？\" 或者更简洁一点。\n\"你好！随时准备协助你处理代码和项目问题。请问今天需要做什么？\"\n\n选择更简洁直接的回复。",
+        "reasoningDone": true,
+        "done": true,
+        "toolCalls": [],
+        "metadata": {
+          "timestamp": 1787306892496,
+          "model": "Alibaba/qwen3.7-max-2026-05-17",
+          "tokens": 762,
+          "durationMs": 1701,
+          "status": "ok"
+        }
+      },
+      {
+        "role": "user",
+        "content": "你是谁",
+        "tags": [
+          {
+            "type": "text",
+            "text": "你是谁"
+          }
+        ],
+        "metadata": {
+          "timestamp": 1787306926103
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "我是你的资深全栈编程助手（Code Agent）。我可以协助你读取和修改本地项目文件、运行测试与构建命令，并解决前端、后端、数据库等全栈开发相关的各种问题。\n\n请问今天有什么具体的项目或代码问题需要我帮忙处理？",
+        "reasoning": "用户问“你是谁”。\n根据系统提示，我是一个资深的全栈编程助手（Code Agent），正在操作一个本地项目。\n我需要用简体中文回答，保持聚焦，避免冗余寒暄。\n\n回答内容：\n我是你的资深全栈编程助手（Code Agent）。我可以帮你读取、修改项目文件，运行测试和构建命令，以及解决前端、后端、数据库等全栈开发相关的问题。请问有什么我可以帮你的？",
+        "reasoningDone": true,
+        "done": true,
+        "toolCalls": [],
+        "metadata": {
+          "timestamp": 1787306927882,
+          "model": "Alibaba/qwen3.7-max-2026-05-17",
+          "tokens": 768,
+          "durationMs": 1766,
+          "status": "ok"
+        }
+      },
+      {
+        "role": "user",
+        "content": "你好wa",
+        "tags": [
+          {
+            "type": "text",
+            "text": "你好wa"
+          }
+        ],
+        "metadata": {
+          "timestamp": 1787308393955
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "你好！请问有什么我可以帮你的？如果有项目代码需要查看、修改，或者遇到任何技术问题，随时告诉我。",
+        "reasoning": "思考过程：\n1. 用户输入了 \"你好wa\"，这是一个简单的打招呼，带有一点语气词或拼写错误（可能是想打“你好哇”）。\n2. 作为AI助手，我需要保持友好、专业，并引导用户提出具体的技术问题或项目需求。\n3. 遵循规则：保持聚焦，避免冗余寒暄。\n4. 回复策略：简单回应问候，并直接询问有什么可以帮忙的。\n\n草稿：\n你好！请问有什么我可以帮你的？如果有项目代码需要查看、修改或者遇到任何技术问题，随时告诉我。",
+        "reasoningDone": true,
+        "done": true,
+        "toolCalls": [],
+        "metadata": {
+          "timestamp": 1787308397272,
+          "model": "qwen3.7-max-2026-05-17",
+          "tokens": 902,
+          "durationMs": 3307,
+          "status": "ok"
+        }
+      }
+    ],
+    "createdAt": 1787306008155,
+    "updatedAt": 1787308397277
   }
 ]

@@ -61,10 +61,21 @@
               @dblclick.stop="startConvRename(s)"
             >{{ s.title || '新对话' }}</span>
             <span
+              v-if="s.messages && s.messages.length > 0"
               class="conv-item__del"
+              title="归档对话"
+              @click.stop.prevent="removeSession(s.id)"
+            >
+              <Archive :size="14" />
+            </span>
+            <span
+              v-else
+              class="conv-item__del conv-item__del--remove"
               title="删除对话"
               @click.stop.prevent="removeSession(s.id)"
-            >×</span>
+            >
+              <Trash2 :size="14" />
+            </span>
           </button>
           <button
             v-if="!grp.isProject"
@@ -98,9 +109,9 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRouter, useRoute } from 'vue-router'
-import { Plus, Search, Settings, MessageSquare } from 'lucide-vue-next'
+import { Plus, Search, Settings, MessageSquare, Archive, Trash2 } from 'lucide-vue-next'
 import { projects, activeProjectId, removeProject, fetchProjects } from './projects.js'
-import { createSession, fetchSessions, deleteSession, updateSession, sessions, NO_PROJECT_KEY } from './sessions.js'
+import { createSession, fetchSessions, deleteSession, archiveSession, updateSession, sessions, NO_PROJECT_KEY } from './sessions.js'
 import { emitBus } from './bus.js'
 
 const router = useRouter()
@@ -118,6 +129,7 @@ const groupedConversations = computed(() => {
     return t.includes(kw) || firstMsg.includes(kw)
   }
   const sorted = [...sessions.list]
+    .filter((s) => !s.archived) // 归档会话不显示在左侧面板
     .filter(match)
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
 
@@ -157,17 +169,29 @@ function selectSession(id) {
   router.push('/chat/' + id)
 }
 
-// 删除会话：跳转到列表中的上一个会话；该项目会话删完则只显示项目名
+// 归档会话：标记为 archived（数据保留在后端），并从左侧面板移除；跳转到相邻未归档会话
+// 注意：若会话没有任何对话内容（messages 为空），则直接物理删除，无需保留空归档
 async function removeSession(id) {
-  const sorted = [...sessions.list].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+  const target = sessions.list.find((s) => s.id === id)
+  const hasContent = target && Array.isArray(target.messages) && target.messages.length > 0
+  const sorted = [...sessions.list]
+    .filter((s) => !s.archived)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
   const idx = sorted.findIndex((s) => s.id === id)
   try {
-    await deleteSession(id)
+    if (hasContent) {
+      await archiveSession(id)
+    } else {
+      await deleteSession(id)
+    }
   } catch (e) {
-    console.error('删除会话失败:', e)
+    console.error('归档会话失败:', e)
     return
   }
-  const rest = [...sessions.list].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+  // archiveSession 已把该条从 sessions.list 移除，这里基于过滤后的列表计算相邻项
+  const rest = [...sessions.list]
+    .filter((s) => !s.archived)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
   if (rest.length === 0) {
     sessions.activeSessionId = null
     router.push('/chat')
@@ -527,8 +551,6 @@ watch(
     justify-content: center;
     .btn-rounded(@radius-sm);
     color: @color-text-muted;
-    font-size: 18px;
-    line-height: 1;
     cursor: pointer;
     opacity: 0;
     transition: opacity 0.12s, background 0.12s, color 0.12s;
@@ -537,6 +559,10 @@ watch(
     opacity: 1;
   }
   &__del:hover {
+    background: @color-bg-subtle;
+    color: @color-primary;
+  }
+  &__del--remove:hover {
     background: #fee2e2;
     color: #dc2626;
   }

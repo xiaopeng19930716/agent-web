@@ -52,3 +52,14 @@ export async function deleteSession(id) {
   sessions.list = sessions.list.filter((s) => s.id !== id)
   if (sessions.activeSessionId === id) sessions.activeSessionId = null
 }
+
+// 归档会话：标记 archived=true，数据保留在后端，前端立即从列表中移除（不显示）
+export async function archiveSession(id) {
+  const session = await request(`/api/sessions/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ archived: true }),
+  })
+  sessions.list = sessions.list.filter((s) => s.id !== id)
+  if (sessions.activeSessionId === id) sessions.activeSessionId = null
+  return session
+}

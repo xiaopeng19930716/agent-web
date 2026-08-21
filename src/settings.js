@@ -195,6 +195,10 @@ async function initModels() {
       })
     }
     settings.customVendors = derived
+    // 清理 configuredVendors / disabledVendors 里已不存在的孤儿 key（如改名后残留的旧 key），避免幽灵条目
+    const validKeys = new Set(Object.keys(settings.vendors))
+    settings.configuredVendors = settings.configuredVendors.filter((k) => validKeys.has(k))
+    settings.disabledVendors = settings.disabledVendors.filter((k) => validKeys.has(k))
   } catch (e) {
     console.error('加载模型配置失败，使用默认值:', e)
   }

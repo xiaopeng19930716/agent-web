@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { projects } from '../lib/store.js'
-import { API_KEY, DEFAULT_MODEL } from '../lib/config.js'
+import { DEFAULT_MODEL } from '../lib/config.js'
 import { loadSkillContents } from '../lib/skills.js'
 import { loadMcpTools } from '../lib/mcpClient.js'
 import {
@@ -9,16 +9,18 @@ import {
   toLangchainMessage,
   TokenStatsHandler,
   buildEffortHint,
+  resolveModelConfig,
 } from '../lib/chat.js'
 
 const router = Router()
 
 router.post('/chat', async (req, res) => {
   const cfg = req.body.config || {}
-  const apiKey = cfg.apiKey || API_KEY
+  // 密钥从服务端配置文件解析，不接收前端明文
+  const apiKey = resolveModelConfig(cfg.model || DEFAULT_MODEL).apiKey
   const model = cfg.model || DEFAULT_MODEL
   if (!apiKey) {
-    res.status(500).json({ error: '未配置 API Key：请在设置面板填写，或在 .env 设置 DASHSCOPE_API_KEY' })
+    res.status(500).json({ error: '未配置 API Key：请在设置面板（供应商配置）中填写并保存' })
     return
   }
 
