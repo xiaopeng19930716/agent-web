@@ -1,8 +1,8 @@
 <script setup>
-import { ref, computed, watch, nextTick } from "vue";
+import { ref, computed, watch, nextTick, onMounted } from "vue";
 import { Plus, ArrowUp, Shield, Zap, Cpu, AtSign, Hash, FolderOpen } from "lucide-vue-next";
 import { settings, flattenVendors } from "../../settings.js";
-import { fetchProjectFiles, searchProjectFiles } from "../../api/agent.js";
+import { fetchProjectFiles, searchProjectFiles, fetchFileTools } from "../../api/agent.js";
 
 const props = defineProps({
   active: { type: Object, default: null },
@@ -76,48 +76,14 @@ const groupedModels = computed(() => {
 });
 
 // ===== 工具命令面板（输入框按 "/" 触发）=====
-const BASE_TOOLS = [
-  {
-    key: "listFiles",
-    name: "列出文件",
-    desc: "listFiles - 递归列出项目目录结构",
-  },
-  {
-    key: "readFile",
-    name: "读取文件",
-    desc: "readFile - 读取项目内某个文件的完整内容",
-  },
-  {
-    key: "writeFile",
-    name: "写入文件",
-    desc: "writeFile - 创建或覆盖写入文件（需完全访问）",
-  },
-  {
-    key: "editFile",
-    name: "编辑文件",
-    desc: "editFile - 在文件中替换代码片段（需完全访问）",
-  },
-  {
-    key: "searchInProject",
-    name: "搜索项目",
-    desc: "searchInProject - 按正则搜索文件名或内容",
-  },
-  {
-    key: "executeCommand",
-    name: "执行命令",
-    desc: "executeCommand - 在项目目录运行 shell 命令（安装/测试/构建/git）",
-  },
-  {
-    key: "listMcp",
-    name: "列出 MCP",
-    desc: "listMcp - 列出当前会话已配置并启用的 MCP 服务器",
-  },
-  {
-    key: "listSkills",
-    name: "列出技能",
-    desc: "listSkills - 列出当前可加载的 Skills 清单",
-  },
-];
+// 基础工具由后端 /api/tools 自动扫描（server/lib/fileTools.js 中 buildTools 声明的全部工具），
+// 不再在前端硬编码，新增工具会自动出现。
+const baseTools = ref([]);
+async function loadBaseTools() {
+  const { tools } = await fetchFileTools();
+  baseTools.value = Array.isArray(tools) ? tools : [];
+}
+onMounted(loadBaseTools);
 const availableMcp = computed(() => {
   const mcp = settings.mcpServers || {};
   const disabled = new Set(
@@ -149,7 +115,7 @@ const selectedMcp = ref([]);
 
 // 全部可选命令（文件工具 + 技能 + MCP）
 const allCmdItems = computed(() => {
-  const items = [...BASE_TOOLS.map((t) => ({ ...t, kind: "tool" }))];
+  const items = [...baseTools.value.map((t) => ({ ...t, kind: "tool" }))];
   for (const s of props.availableSkills)
     items.push({ key: s.key, kind: "skill", name: s.name, desc: s.desc });
   for (const m of availableMcp.value)

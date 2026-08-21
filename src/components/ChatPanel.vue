@@ -16,7 +16,7 @@ import {
   updateSession,
 } from '../sessions.js'
 import { settings, flattenVendors } from '../settings.js'
-import { fetchSkills } from '../api/agent.js'
+import { fetchSkills, fetchFileTools } from '../api/agent.js'
 import { onBus, emitBus } from '../bus.js'
 import ChatLogDrawer from './ChatLogDrawer.vue'
 import ChatHeader from './chat/ChatHeader.vue'
@@ -56,14 +56,9 @@ const dirPickerHint = dirPickerSupported
   ? '点击「选择文件夹」从浏览器选择目录；或在输入框手动粘贴绝对路径'
   : '当前浏览器不支持文件夹选择，请在下方输入框手动粘贴项目的绝对路径（如 C:/Users/you/my-project）'
 
-// 基础工具（与 ComposerInput 内保持一致，供 send 判断 tag 类型）
-const BASE_TOOLS = [
-  { key: 'listFiles', name: '列出文件', desc: 'listFiles - 递归列出项目目录结构' },
-  { key: 'readFile', name: '读取文件', desc: 'readFile - 读取项目内某个文件的完整内容' },
-  { key: 'writeFile', name: '写入文件', desc: 'writeFile - 创建或覆盖写入文件（需完全访问）' },
-  { key: 'editFile', name: '编辑文件', desc: 'editFile - 在文件中替换代码片段（需完全访问）' },
-  { key: 'searchInProject', name: '搜索项目', desc: 'searchInProject - 按正则搜索文件名或内容' },
-]
+// 基础工具清单：由后端 /api/tools 自动扫描（server/lib/fileTools.js 中 buildTools 声明的全部工具），
+// 默认对所有会话启用（无需用户在输入框中勾选），模型可自动调用。新增工具会自动出现，无需前端硬编码。
+const baseTools = ref([])
 const availableSkills = ref([])
 const availableMcp = computed(() => {
   const mcp = settings.mcpServers || {}
@@ -79,6 +74,12 @@ async function loadAvailableSkills() {
   availableSkills.value = skills
     .filter((s) => enabled.has(s.id))
     .map((s) => ({ key: s.id, name: s.name }))
+}
+
+// 从后端自动拉取基础文件工具清单（server/lib/fileTools.js 声明的全部工具）
+async function loadBaseTools() {
+  const { tools } = await fetchFileTools()
+  baseTools.value = Array.isArray(tools) ? tools : []
 }
 
 async function switchProject(pid) {
@@ -117,6 +118,9 @@ const composerRef = ref(null)
 async function send(payload) {
   const { composerTokens, sessionToolCmds, selectedSkills, selectedMcp } = payload
 
+  // 确保基础工具清单已加载（首次进入尚未拉取时兜底）
+  if (!baseTools.value.length) await loadBaseTools()
+
   const tagToolKeys = new Set()
   const tagSkillIds = new Set()
   const tagMcpNames = new Set()
@@ -125,7 +129,7 @@ async function send(payload) {
     if (t.type === 'text') {
       bodyParts.push(t.text)
     } else if (t.type === 'tag') {
-      if (t.kind === 'tool' && BASE_TOOLS.some((b) => b.key === t.key)) {
+      if (t.kind === 'tool' && baseTools.value.some((b) => b.key === t.key)) {
         tagToolKeys.add(t.key) // 工具
         bodyParts.push(`/${t.label || t.key}`) // 与输入框 chip 显示一致
       } else if (t.kind === 'skill') {
@@ -145,7 +149,7 @@ async function send(payload) {
 
   // 与旧式 sessionToolCmds/selectedSkills/selectedMcp 合并（保留兼容）
   const cmdSet = new Set([...sessionToolCmds, ...tagToolKeys])
-  const fileTools = BASE_TOOLS.map((t) => t.key).filter((k) => cmdSet.has(k))
+  const fileTools = baseTools.value.map((t) => t.key).filter((k) => cmdSet.has(k))
   const skillIds = [...new Set([...selectedSkills, ...tagSkillIds].filter((k) =>
     availableSkills.value.some((s) => s.key === k)))]
   const mcpNames = [...new Set([...selectedMcp, ...tagMcpNames].filter((k) =>
@@ -281,7 +285,7 @@ async function send(payload) {
 // 切换项目
 async function init() {
   await Promise.all([fetchProjects(), fetchSessions()])
-  await loadAvailableSkills()
+  await Promise.all([loadAvailableSkills(), loadBaseTools()])
 }
 
 onMounted(init)

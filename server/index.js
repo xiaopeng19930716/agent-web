@@ -13,6 +13,7 @@ import modelsRouter from './routes/models.js'
 import mcpRouter from './routes/mcp.js'
 import skillsRouter from './routes/skills.js'
 import importRouter from './routes/import.js'
+import toolsRouter from './routes/tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 config({ path: join(__dirname, '..', '.env') })
@@ -34,6 +35,7 @@ app.use('/api', modelsRouter)
 app.use('/api', mcpRouter)
 app.use('/api', skillsRouter)
 app.use('/api', importRouter)
+app.use('/api', toolsRouter)
 
 app.listen(PORT, () => {
   console.log(`Code Agent 后端已启动: http://localhost:${PORT}`)

@@ -95,6 +95,19 @@ export async function fetchSkills() {
   }
 }
 
+// 从后端自动扫描的文件工具清单（server/lib/fileTools.js 中 buildTools 声明的全部工具）。
+// 前端不再硬编码基础工具，新增工具会随此接口自动出现。
+export async function fetchFileTools() {
+  try {
+    const resp = await fetch('/api/tools')
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) return { tools: [], error: data.error || `请求失败: ${resp.status}` }
+    return { tools: data.tools || [], error: '' }
+  } catch (err) {
+    return { tools: [], error: String(err) }
+  }
+}
+
 // 扫描其他 Agent 已配置的 MCP 与 Skills（只读，供导入选择）
 export async function fetchImportSources() {
   try {

@@ -326,3 +326,15 @@ export function buildTools(root, permission = 'full', toolKeys, mcpServers = {})
   if (!Array.isArray(toolKeys)) return all
   return all.filter((t) => toolKeys.includes(t.name))
 }
+
+// 返回所有文件工具的元信息（名称 + 描述），供前端自动构建基础工具清单。
+// 直接复用 buildTools 的产出（仅读取 name/description，不实际执行函数），
+// 因此在 buildTools 中新增 / 删除工具时，此处会自动同步，前端无需手动维护。
+export function getToolCatalog() {
+  const tools = buildTools(process.cwd(), 'full', undefined, {})
+  return tools.map((t) => ({
+    key: t.name,
+    name: t.name,
+    description: t.description || '',
+  }))
+}

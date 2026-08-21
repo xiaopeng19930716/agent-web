@@ -182,13 +182,15 @@ onMounted(updateToBottom)
               <div
                 v-if="m.role === 'assistant' && (m.reasoning || (m.toolCalls || []).length)"
                 class="thinking thinking--nested"
-                :class="{ 'thinking--collapsed': m.reasoningDone && !thinkingExpanded.has(i) }"
+                :class="{ 'thinking--collapsed': !thinkingExpanded.has(i) }"
               >
-                <button class="thinking__head" @click="m.reasoningDone ? toggleThinking(i) : null">
+                <button class="thinking__head" :aria-expanded="thinkingExpanded.has(i)" @click="toggleThinking(i)">
                   <span class="thinking__dot" :class="{ 'thinking__dot--done': m.reasoningDone }"></span>
                   <template v-if="!m.reasoningDone">
                     <span class="thinking__title">思考中</span>
                     <span class="thinking__dots"><i></i><i></i><i></i></span>
+                    <ChevronDown v-if="!thinkingExpanded.has(i)" :size="14" class="thinking__chevron" />
+                    <ChevronUp v-else :size="14" class="thinking__chevron" />
                   </template>
                   <template v-else>
                     <span class="thinking__title thinking__title--done">✓ 思考完成</span>
