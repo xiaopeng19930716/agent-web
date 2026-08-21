@@ -59,9 +59,10 @@ router.post('/chat', async (req, res) => {
       projectRoot ? perm : 'none',
       callbacks,
       {
-        enabledTools: projectRoot && Array.isArray(tools) && tools.length ? tools : [],
+        enabledTools: Array.isArray(tools) ? tools : [],
         skillPrompts,
         mcpTools,
+        mcpServers,
         effortHint,
       }
     )

@@ -4,6 +4,7 @@ import path from 'path'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { tool } from '@langchain/core/tools'
+import { scanSkills } from './skills.js'
 
 const execAsync = promisify(exec)
 // 命令输出截断上限，避免超大输出（如 build 日志）撑爆模型上下文
@@ -121,10 +122,11 @@ export function searchFiles(root, keyword, maxResults = 50) {
   return out
 }
 
-export function buildTools(root, permission = 'full', toolKeys) {
+export function buildTools(root, permission = 'full', toolKeys, mcpServers = {}) {
   // permission: 'full' 可写；'read-only' / 'none' 禁止写入文件
-  // toolKeys：可选，允许启用的工具 key（listFiles/readFile/writeFile/editFile/searchInProject）。
+  // toolKeys：可选，允许启用的工具 key（listFiles/readFile/writeFile/editFile/searchInProject/listMcp/listSkills）。
   // 未传或非数组 -> 返回全部；空数组 -> 返回 []；否则按 key 过滤。
+  // mcpServers：当前会话已配置的 MCP 服务器映射，供 listMcp 工具使用（无需项目根）。
   const canWrite = permission === 'full'
   const writeGuard = async (fn) => {
     if (!canWrite) return '当前权限为只读，无法写入或编辑文件。如需修改文件，请在对话框中将权限级别切换为「完全访问」。'
@@ -280,6 +282,44 @@ export function buildTools(root, permission = 'full', toolKeys) {
           },
           required: ['command'],
         },
+      }
+    ),
+    // 以下两个工具不依赖项目根，可在无项目时直接使用
+    tool(
+      async () => {
+        const servers = mcpServers && typeof mcpServers === 'object' ? mcpServers : {}
+        const entries = Object.entries(servers)
+        if (entries.length === 0) return '(未配置任何 MCP 服务器)'
+        return entries
+          .map(([name, cfg]) => {
+            const type = cfg && cfg.type ? cfg.type : 'unknown'
+            const enabled = !(cfg && cfg.enabled === false)
+            return `- ${name} [${type}] ${enabled ? '已启用' : '已停用'}`
+          })
+          .join('\n')
+      },
+      {
+        name: 'listMcp',
+        description: '列出当前会话已配置并可用的 MCP 服务器（名称/类型/启用状态），无需项目根。',
+        schema: { type: 'object', properties: {}, required: [] },
+      }
+    ),
+    tool(
+      async () => {
+        try {
+          const skills = await scanSkills()
+          if (!skills || skills.length === 0) return '(未发现有可用的 Skills)'
+          return skills
+            .map((s) => `- ${s.id}： ${s.name}（${s.description || '无描述'}）`)
+            .join('\n')
+        } catch (e) {
+          return '读取 Skills 失败：' + (e.message || String(e))
+        }
+      },
+      {
+        name: 'listSkills',
+        description: '列出当前系统中可加载的 Skills 清单（id/名称/描述），无需项目根。',
+        schema: { type: 'object', properties: {}, required: [] },
       }
     ),
   ]

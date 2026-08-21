@@ -167,10 +167,17 @@ async function initModels() {
     const res = await fetch('/api/settings/models')
     if (!res.ok) return
     const data = await res.json()
-    // 磁盘格式顶层直接是 vendorKey 映射 + activeModel，需把它俩拆出来
-    const parsed = { vendors: {}, activeModel: data.activeModel || '' }
+    // 磁盘格式顶层直接是 vendorKey 映射 + activeModel + 控制字段，
+    // 需把 vendorKey 与控制字段分开，避免把控制字段当成供应商
+    const CONTROL_KEYS = ['activeModel', 'configuredVendors', 'disabledVendors', 'customVendors']
+    const parsed = {
+      vendors: {},
+      activeModel: data.activeModel || '',
+      configuredVendors: asArray(data.configuredVendors),
+      disabledVendors: asArray(data.disabledVendors),
+    }
     for (const [k, v] of Object.entries(data)) {
-      if (k === 'activeModel') continue
+      if (CONTROL_KEYS.includes(k)) continue
       parsed.vendors[k] = v
     }
     Object.assign(settings, buildModels(parsed))
@@ -245,7 +252,12 @@ export async function saveSettings() {
 // 仅回写模型配置（磁盘格式 = { activeModel, [vendorKey]: {...} }）
 export async function saveModels() {
   try {
-    const payload = { activeModel: settings.activeModel || '', ...settings.vendors }
+    const payload = {
+      activeModel: settings.activeModel || '',
+      configuredVendors: settings.configuredVendors,
+      disabledVendors: settings.disabledVendors,
+      ...settings.vendors,
+    }
     const res = await fetch('/api/settings/models', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

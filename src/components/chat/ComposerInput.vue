@@ -107,6 +107,16 @@ const BASE_TOOLS = [
     name: "执行命令",
     desc: "executeCommand - 在项目目录运行 shell 命令（安装/测试/构建/git）",
   },
+  {
+    key: "listMcp",
+    name: "列出 MCP",
+    desc: "listMcp - 列出当前会话已配置并启用的 MCP 服务器",
+  },
+  {
+    key: "listSkills",
+    name: "列出技能",
+    desc: "listSkills - 列出当前可加载的 Skills 清单",
+  },
 ];
 const availableMcp = computed(() => {
   const mcp = settings.mcpServers || {};

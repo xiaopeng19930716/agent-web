@@ -97,13 +97,14 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, RouterView, useRouter } from 'vue-router'
+import { RouterLink, RouterView, useRouter, useRoute } from 'vue-router'
 import { Plus, Search, Settings, MessageSquare } from 'lucide-vue-next'
-import { projects, activeProjectId, removeProject } from './projects.js'
+import { projects, activeProjectId, removeProject, fetchProjects } from './projects.js'
 import { createSession, fetchSessions, deleteSession, updateSession, sessions, NO_PROJECT_KEY } from './sessions.js'
 import { emitBus } from './bus.js'
 
 const router = useRouter()
+const route = useRoute()
 const keyword = ref('')
 
 const activeSessionId = computed(() => sessions.activeSessionId)
@@ -152,7 +153,8 @@ function selectSession(id) {
   if (s) {
     activeProjectId.id = s.projectId && s.projectId !== NO_PROJECT_KEY ? s.projectId : ''
   }
-  router.push('/chat')
+  // 把当前会话 ID 写入路由，刷新后可由 URL 恢复
+  router.push('/chat/' + id)
 }
 
 // 删除会话：跳转到列表中的上一个会话；该项目会话删完则只显示项目名
@@ -168,6 +170,7 @@ async function removeSession(id) {
   const rest = [...sessions.list].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
   if (rest.length === 0) {
     sessions.activeSessionId = null
+    router.push('/chat')
     return
   }
   let next
@@ -179,6 +182,7 @@ async function removeSession(id) {
   if (s) {
     activeProjectId.id = s.projectId && s.projectId !== NO_PROJECT_KEY ? s.projectId : ''
   }
+  router.push('/chat/' + next.id)
 }
 
 // 删除项目：二次确认后级联删除该项目及其所有会话
@@ -201,15 +205,15 @@ async function confirmRemoveProject(pid) {
 async function onNewChat() {
   // 左上角"新对话"：始终创建一个新的通用对话（不关联项目），并切到通用对话
   activeProjectId.id = ''
-  await createSession(NO_PROJECT_KEY)
-  router.push('/chat')
+  const session = await createSession(NO_PROJECT_KEY)
+  router.push('/chat/' + session.id)
 }
 
 // 侧边栏项目名旁的「＋」：在该项目中新增一个对话
 async function newProjectSession(pid) {
   activeProjectId.id = pid
-  await createSession(pid)
-  router.push('/chat')
+  const session = await createSession(pid)
+  router.push('/chat/' + session.id)
 }
 
 // 通用对话分组下的"添加项目"入口：派发总线事件，由 ChatPanel 监听并打开弹窗
@@ -254,13 +258,35 @@ function cancelConvRename() {
   editingConvId.value = null
 }
 
+// 根据路由中的 sessionId 恢复当前会话（刷新/深链/前进后退时保持）
+function syncActiveFromRoute() {
+  const id = route.params.sessionId
+  if (!id) return // 无参数：保持现有默认/最近会话
+  if (sessions.list.some((s) => s.id === id)) {
+    sessions.activeSessionId = id
+    const s = sessions.list.find((x) => x.id === id)
+    if (s) {
+      activeProjectId.id = s.projectId && s.projectId !== NO_PROJECT_KEY ? s.projectId : ''
+    }
+  }
+}
+
 onMounted(async () => {
   try {
-    await fetchSessions()
+    // 会话与项目并行加载，避免项目下会话在刷新后因项目列表为空而落入"未知项目"被过滤
+    await Promise.all([fetchSessions(), fetchProjects()])
+    // 会话加载完成后，用 URL 中的 sessionId 恢复当前会话
+    syncActiveFromRoute()
   } catch (e) {
-    console.error('加载会话失败:', e)
+    console.error('加载失败:', e)
   }
 })
+
+// 路由参数变化（如浏览器前进/后退）时同步当前会话
+watch(
+  () => route.params.sessionId,
+  () => syncActiveFromRoute()
+)
 
 // 项目列表变化时若没有活动会话则保持
 watch(
@@ -474,10 +500,6 @@ watch(
     .btn-rounded(4px);
     padding: 1px 2px;
     margin: -1px -2px;
-
-    &:hover {
-      background: #e2e8f0;
-    }
   }
   &--editing {
     background: @color-primary-active-bg;

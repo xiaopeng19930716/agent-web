@@ -48,8 +48,8 @@ export function buildChatModel(cfg, callbacks) {
 // Agent 主循环：多轮「模型推理 → 工具调用 → 回灌结果」直至模型不再请求工具
 // 全程流式输出到 res（reasoning 增量 + 正文增量 + 工具调用结构化事件）
 export async function runAgent(model, history, projectRoot, res, permission = 'full', callbacks, opts = {}) {
-  const { enabledTools, skillPrompts = [], mcpTools = [], effortHint = '' } = opts
-  const { modelWithTools, toolMap } = buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools)
+  const { enabledTools, skillPrompts = [], mcpTools = [], mcpServers = {}, effortHint = '' } = opts
+  const { modelWithTools, toolMap } = buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools, mcpServers)
   const messages = buildSystemMessages(history, skillPrompts, effortHint)
 
   const MAX_TURNS = 12
@@ -75,8 +75,8 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
 
 // 组装工具（文件工具受项目目录安全边界约束 + MCP 工具），并绑定到模型
 // 没有工具时返回原模型，避免 bindTools([]) 行为异常
-function buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools) {
-  const tools = [...buildTools(projectRoot, permission, enabledTools), ...mcpTools]
+function buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools, mcpServers = {}) {
+  const tools = [...buildTools(projectRoot, permission, enabledTools, mcpServers), ...mcpTools]
   const toolMap = Object.fromEntries(tools.map((t) => [t.name, t]))
   const modelWithTools = tools.length ? model.bindTools(tools) : model
   return { modelWithTools, toolMap }
