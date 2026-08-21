@@ -123,10 +123,13 @@ async function send(payload) {
     } else if (t.type === 'tag') {
       if (t.kind === 'tool' && BASE_TOOLS.some((b) => b.key === t.key)) {
         tagToolKeys.add(t.key) // 工具
+        bodyParts.push(`/${t.label || t.key}`) // 与输入框 chip 显示一致
       } else if (t.kind === 'skill') {
         tagSkillIds.add(t.key)
+        bodyParts.push(`/${t.label || t.key}`)
       } else if (t.kind === 'mcp') {
         tagMcpNames.add(t.key)
+        bodyParts.push(`⌘/${t.label || t.key}`) // ⌘ 图标 + 工具名
       } else {
         // 普通文件 / 文件夹：保留 @路径 引用在正文中
         bodyParts.push(`@${t.key}`)
@@ -142,7 +145,7 @@ async function send(payload) {
   const skillIds = [...new Set([...selectedSkills, ...tagSkillIds].filter((k) =>
     availableSkills.value.some((s) => s.key === k)))]
   const mcpNames = [...new Set([...selectedMcp, ...tagMcpNames].filter((k) =>
-    availableMcp.value.some((s) => s.key === k)))]
+    availableMcp.value.includes(k)))]
   const mcpServersPayload = Object.fromEntries(
     mcpNames
       .map((n) => [n, (settings.mcpServers || {})[n]])
@@ -162,7 +165,12 @@ async function send(payload) {
 
   const pid = active.value?.id ?? null
   error.value = ''
-  session.messages.push({ role: 'user', content: text, metadata: { timestamp: Date.now() } })
+  // 保存结构化 token（文本/工具/技能/MCP/文件），供气泡渲染样式化 chip
+  const tags = composerTokens.map((t) => ({
+    type: t.type,
+    ...(t.type === 'tag' ? { kind: t.kind, key: t.key, label: t.label || t.key } : { text: t.text }),
+  }))
+  session.messages.push({ role: 'user', content: text, tags, metadata: { timestamp: Date.now() } })
   // 清空富文本输入框（委托子组件）
   composerRef.value?.clear()
 
@@ -171,6 +179,7 @@ async function send(payload) {
     content: '',
     reasoning: '',
     reasoningDone: false,
+    done: false, // 思考+生成全部完成（或出错）后才允许复制
     toolCalls: [], // [{ name, args, status, result }]
     metadata: {},
   })
@@ -236,6 +245,7 @@ async function send(payload) {
     onDone: async (meta) => {
       loading.value = false
       assistant.reasoningDone = true
+      assistant.done = true
       // 回填助手消息的元数据日志（时间、模型、token、耗时、状态）
       assistant.metadata = {
         timestamp: Date.now(),
@@ -253,6 +263,7 @@ async function send(payload) {
     onError: (msg) => {
       error.value = msg
       assistant.reasoningDone = true
+      assistant.done = true
       assistant.metadata = {
         timestamp: Date.now(),
         model: modelId,

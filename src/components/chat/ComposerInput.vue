@@ -453,6 +453,23 @@ function insertTagAtTrigger(t) {
   syncTokensFromDom();
 }
 
+// 粘贴处理：去除富文本格式按纯文本插入；忽略图片（当前后端仅支持文本/文件引用）
+function onPaste(e) {
+  const cd = e.clipboardData || window.clipboardData;
+  if (!cd) return;
+  // 剪贴板含图片等文件：暂不支持，静默忽略，避免插入乱码
+  if (cd.files && cd.files.length) {
+    e.preventDefault();
+    return;
+  }
+  const text = cd.getData("text/plain");
+  if (text) {
+    e.preventDefault();
+    // 插入纯文本（保留撤销栈并触发 input 事件以同步 token）
+    document.execCommand("insertText", false, text);
+  }
+}
+
 // 输入框输入统一触发
 function onCmdInput() {
   syncTokensFromDom();
@@ -473,6 +490,10 @@ function onCmdInput() {
       const sym = a > b ? "@" : "/";
       const tail = txt.slice(pick);
       if (/\s/.test(tail)) continue;
+      // 触发符必须位于文本节点开头或前一个字符为空白，
+      // 否则会误命中 URL（如 https://…）或路径中的 @ /，导致面板误开、发送被拦截
+      const prevChar = pick > 0 ? txt[pick - 1] : "";
+      if (pick > 0 && !/\s/.test(prevChar)) continue;
       targetNode = child;
       targetLocalIdx = pick;
       foundSym = sym;
@@ -792,6 +813,7 @@ defineExpose({ clear, focusComposer });
       @input="onCmdInput"
       @keydown="onCmdKeydown"
       @keydown.enter.exact.prevent="triggerSend"
+      @paste="onPaste"
     ></div>
 
     <!-- 富文本输入框（contenteditable），已选技能/工具/MCP/文件均以 chip 形式内联在框内 -->
