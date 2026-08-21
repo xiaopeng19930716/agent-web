@@ -12,7 +12,18 @@
       </div>
 
       <nav class="conv-list">
-        <template v-for="grp in groupedConversations" :key="grp.key">
+        <template v-for="(grp, idx) in groupedConversations" :key="grp.key">
+          <!-- 在第一个项目之前插入"添加项目"按钮（即：通用对话最下方、首项目上方） -->
+          <button
+            v-if="idx === firstProjectIndex"
+            type="button"
+            class="conv-group__addproject"
+            @click.stop.prevent="openAddProject"
+          >
+            <Plus :size="13" />
+            <span>添加项目</span>
+          </button>
+
           <div v-if="grp.isProject" class="conv-group__head">
             <div class="conv-group__title">{{ grp.label }}</div>
             <div class="conv-group__actions">
@@ -77,19 +88,22 @@
               <Trash2 :size="14" />
             </span>
           </button>
-          <button
-            v-if="!grp.isProject"
-            class="conv-group__addproject"
-            @click.stop.prevent="openAddProject"
-          >
-            <Plus :size="13" />
-            <span>添加项目</span>
-          </button>
         </template>
 
         <div v-if="groupedConversations.length === 0" class="conv-empty">
           暂无对话，点击「新对话」开始
         </div>
+
+        <!-- 没有项目时（仅通用对话 / 无任何内容）也显示添加项目按钮 -->
+        <button
+          v-if="firstProjectIndex === -1"
+          type="button"
+          class="conv-group__addproject"
+          @click.stop.prevent="openAddProject"
+        >
+          <Plus :size="13" />
+          <span>添加项目</span>
+        </button>
       </nav>
 
       <div class="sidebar__footer">
@@ -119,6 +133,16 @@ const route = useRoute()
 const keyword = ref('')
 
 const activeSessionId = computed(() => sessions.activeSessionId)
+
+// 第一个真实项目组在分组列表中的索引；无项目时返回 -1
+// 用于把"添加项目"按钮插在「通用对话最下方、首个项目上方」
+const firstProjectIndex = computed(() => {
+  const groups = groupedConversations.value
+  for (let i = 0; i < groups.length; i++) {
+    if (groups[i].isProject) return i
+  }
+  return -1
+})
 
 const groupedConversations = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -456,7 +480,7 @@ watch(
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin: 10px 14px 6px;
+  margin: 12px 14px 8px;
   padding: 6px 10px;
   width: calc(100% - 28px);
   border: 1px dashed #d1d5db;

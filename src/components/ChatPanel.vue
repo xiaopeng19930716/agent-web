@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { streamChat } from '../api/agent.js'
 import {
   activeProjectId,
@@ -45,6 +46,7 @@ const currentMessages = computed(() => activeSession.value?.messages || [])
 
 const showLog = ref(false)
 const showAdd = ref(false)
+const router = useRouter()
 
 // 添加项目表单
 const form = ref({ alias: '', path: '' })
@@ -92,10 +94,12 @@ async function switchProject(pid) {
   }
 }
 
-// 在当前项目中新增对话（项目名右侧的 + 按钮）
+// 在输入框上方新增会话：有项目则创建项目对话，否则创建通用对话
 async function newProjectChat() {
-  if (!active.value) return
-  await createSession(active.value.id)
+  const pid = active.value?.id || NO_PROJECT_KEY
+  if (pid === NO_PROJECT_KEY) activeProjectId.id = ''
+  const session = await createSession(pid)
+  if (session?.id) router.push('/chat/' + session.id)
 }
 
 function openAdd() {

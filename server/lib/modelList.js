@@ -12,7 +12,7 @@ export const MODEL_LIST_TYPE = {
         .map((m) =>
           typeof m === 'string'
             ? { id: m, name: m }
-            : { id: m && m.id, name: (m && (m.name || m.id)) || m.id }
+            : { id: m && (m.id || m.model), name: (m && (m.name || m.id || m.model)) || (m && (m.id || m.model)) }
         )
         .filter((m) => m.id)
     },
@@ -41,7 +41,7 @@ export const MODEL_LIST_TYPE = {
       const field = rule.parseField || 'data'
       const list = Array.isArray(json[field]) ? json[field] : []
       return list
-        .map((m) => (typeof m === 'string' ? { id: m, name: m } : { id: m && m.id, name: (m && (m.name || m.id)) || m.id }))
+        .map((m) => (typeof m === 'string' ? { id: m, name: m } : { id: m && (m.id || m.model), name: (m && (m.name || m.id || m.model)) || (m && (m.id || m.model)) }))
         .filter((m) => m.id)
     },
     needKey: false,

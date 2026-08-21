@@ -65,6 +65,23 @@ const PRESET_VENDOR_KEYS = new Set(PRESET_VENDORS.map((v) => v.key))
 const emptyRow = () => ({ name: '', id: '', maxTokens: '', temperature: 0.3 })
 const form = reactive({ name: '', website: '', vendorKey: '', baseUrl: '', apiKey: '', platform: 'openai', modelRows: [emptyRow()] })
 
+// 模型 ID 下拉选项（来自「获取模型列表」），供 a-auto-complete 选择
+const modelIdOptions = ref([])
+// 当前聚焦的模型行索引，用于控制 a-auto-complete 下拉展开（避免因空值而不弹）
+const acFocusIdx = ref(-1)
+// 由模型 ID 生成模型名称：短横线替换为空格，已有空格保留，每个单词首字母大写
+// 例如 gpt-4o-mini -> Gpt 4o Mini / qwen3.7-max-2026-05-17 -> Qwen3.7 Max 2026 05 17
+function idToName(s) {
+  return String(s)
+    .replace(/-/g, ' ')
+    .replace(/(^|\s)(\w)/g, (_, sp, c) => sp + c.toUpperCase())
+}
+// 在下拉中选择模型 ID 时，自动把模型名称按规则填充
+function onModelIdSelect(row, val) {
+  row.id = val
+  row.name = idToName(val)
+}
+
 const modelsOfVendor = computed(() => {
   const v = settings.vendors[activeKey.value]
   if (!v || !v.models) return []
@@ -334,10 +351,9 @@ async function fetchModels() {
       message.error('该接口未返回任何模型')
       return
     }
-    // 模型较多时只填入前 10 个，其余可手动添加
-    const MAX_FETCH_ROWS = 10
-    form.modelRows = models.slice(0, MAX_FETCH_ROWS).map((m) => ({ name: m.name || m.id, id: m.id, maxTokens: '', temperature: 0.3 }))
-    message.success(models.length > MAX_FETCH_ROWS ? `已获取 ${models.length} 个模型，仅填入前 ${MAX_FETCH_ROWS} 个` : `已获取 ${models.length} 个模型`)
+    // 将获取到的模型 ID 填入下拉，供各模型行的 a-autocomplete 选择
+    modelIdOptions.value = models.map((m) => ({ value: m.id, label: m.id }))
+    message.success(`已获取 ${models.length} 个模型，已加入模型 ID 下拉，可在各行选择`)
   } finally {
     fetchLoading.value = false
   }
@@ -351,13 +367,13 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
     <!-- 供应商卡片 -->
     <section class="mb-8">
       <h3 class="text-base font-semibold text-gray-700 mb-3">供应商</h3>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-2 gap-3 auto-rows-fr">
         <div
           v-for="v in allVendors"
           :key="v.key"
           role="button"
           tabindex="0"
-          class="group relative flex items-center justify-between gap-2 rounded-xl border bg-white px-4 py-3 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md cursor-pointer"
+          class="group relative flex h-full items-center justify-between gap-2 rounded-xl border bg-white px-4 py-3 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md cursor-pointer"
           :class="[
             activeKey === v.key ? 'border-brand ring-2 ring-brand/30' : 'border-gray-200',
             isVendorDisabled(v.key) ? 'opacity-60' : '',
@@ -492,13 +508,20 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
                 v-model:value="row.name"
                 placeholder="模型名称（界面显示）"
                 size="middle"
+                class="flex-1 min-w-0"
                 :disabled="!editing"
               />
-              <a-input
+              <a-auto-complete
                 v-model:value="row.id"
-                placeholder="模型 ID（发给大模型）"
+                :options="modelIdOptions"
+                placeholder="模型 ID（发给大模型，可下拉选择）"
                 size="middle"
+                class="flex-1 min-w-0"
                 :disabled="!editing"
+                :open="acFocusIdx === i"
+                @focus="acFocusIdx = i"
+                @blur="acFocusIdx = -1"
+                @select="(val) => onModelIdSelect(row, val)"
               />
               <a-input-number
                 v-model:value="row.maxTokens"
@@ -506,21 +529,10 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
                 :step="1"
                 placeholder="Max Tokens"
                 size="middle"
-                class="w-64"
-                :disabled="!editing"
-              />
-              <a-input-number
-                v-model:value="row.temperature"
-                :min="0"
-                :max="2"
-                :step="0.1"
-                placeholder="温度"
-                size="middle"
-                class="w-32"
+                class="w-28"
                 :disabled="!editing"
               />
               <button
-                v-if="i === form.modelRows.length - 1"
                 type="button"
                 title="添加模型行"
                 :disabled="!editing"
@@ -530,10 +542,9 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
                 <Plus :size="18" />
               </button>
               <button
-                v-else
                 type="button"
                 title="删除该模型行"
-                :disabled="!editing"
+                :disabled="!editing || form.modelRows.length <= 1"
                 class="shrink-0 inline-flex items-center justify-center w-9 h-9 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 @click="removeModelRow(i)"
               >

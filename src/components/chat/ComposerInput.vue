@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick } from "vue";
-import { Plus } from "lucide-vue-next";
+import { Plus, ArrowUp, Shield, Zap, Cpu, AtSign, Hash, FolderOpen } from "lucide-vue-next";
 import { settings, flattenVendors } from "../../settings.js";
 import { fetchProjectFiles, searchProjectFiles } from "../../api/agent.js";
 
@@ -635,6 +635,11 @@ async function focusComposer() {
   await nextTick();
   composerEl.value?.focus();
 }
+function insertText(text) {
+  if (!composerEl.value) return;
+  composerEl.value.focus();
+  document.execCommand("insertText", false, text);
+}
 function onAtInput() {
   if (atSearchMode.value) scheduleAtSearch();
   else {
@@ -674,59 +679,32 @@ defineExpose({ clear, focusComposer });
 </script>
 
 <template>
-  <div class="chat__input">
-    <div class="chat__input-top">
-      <span v-if="active" class="chat__project-badge" :title="active.path">{{
-        active.alias
-      }}</span>
-      <button
-        v-if="active"
-        class="chat__newproj"
-        title="新建对话"
-        @click="emit('new-project-chat')"
-      >
-        <Plus :size="15" />
-      </button>
-      <div class="chat__input-top-right">
-        <label class="chat__select">
-          模型
-          <a-select
-            v-model:value="settings.activeModel"
-            :options="groupedModels"
-            :field-names="{ label: 'label', value: 'key', options: 'items' }"
-            size="small"
-          />
-        </label>
-        <label class="chat__select">
-          强度
-          <a-select
-            v-model:value="effort"
-            style="width: 88px"
-            size="small"
-            :options="[
-              { value: 'low', label: '省量' },
-              { value: 'medium', label: '均衡' },
-              { value: 'high', label: '深度' },
-            ]"
-          />
-        </label>
-        <label class="chat__select">
-          权限
-          <a-select
-            v-model:value="permission"
-            style="width: 96px"
-            size="small"
-            :options="[
-              { value: 'full', label: '完全访问' },
-              { value: 'read-only', label: '只读' },
-              { value: 'none', label: '不允许' },
-            ]"
-          />
-        </label>
+  <div class="chat__composer">
+    <div class="chat__input-header">
+      <div class="chat__context-group" role="group" aria-label="当前会话上下文">
+        <span
+          class="chat__project-badge"
+          :title="active?.path || '通用对话'"
+        >
+          <FolderOpen v-if="active" :size="13" class="chat__project-icon" />
+          <span v-else class="chat__project-dot"></span>
+          <span class="chat__project-label">{{
+            active?.alias || "通用对话"
+          }}</span>
+        </span>
+        <button
+          type="button"
+          class="chat__newproj"
+          aria-label="新建会话"
+          title="新建会话"
+          @click="emit('new-project-chat')"
+        >
+          <Plus :size="14" />
+        </button>
       </div>
     </div>
-
-    <!-- @ 文件/目录 面板 -->
+    <div class="chat__input">
+      <!-- @ 文件/目录 面板 -->
     <div v-if="showAtPanel" class="at-panel">
       <div class="at-panel__toolbar">
         <span class="at-hint-icon">@</span>
@@ -828,82 +806,170 @@ defineExpose({ clear, focusComposer });
 
     <!-- 富文本输入框（contenteditable），已选技能/工具/MCP/文件均以 chip 形式内联在框内 -->
 
-    <div class="chat__input-bottom">
-      <button class="chat__send" :disabled="loading" @click="triggerSend">
-        <span class="chat__send-icon"></span>
-        发送
+    <div class="chat__input-footer">
+      <div class="chat__footer-left">
+        <div class="chat__quick-actions">
+          <button
+            type="button"
+            class="chat__quick-btn"
+            title="引用文件/目录"
+            @click="insertText('@')"
+          >
+            <AtSign :size="14" />
+          </button>
+          <button
+            type="button"
+            class="chat__quick-btn"
+            title="选择工具"
+            @click="insertText('/')"
+          >
+            <Hash :size="14" />
+          </button>
+        </div>
+        <div class="chat__controls">
+          <div class="chat__control" title="权限">
+            <Shield :size="14" class="chat__control-icon" />
+            <a-select
+              v-model:value="permission"
+              size="small"
+              :bordered="false"
+              :options="[
+                { value: 'full', label: '完全访问' },
+                { value: 'read-only', label: '只读' },
+                { value: 'none', label: '不允许' },
+              ]"
+            />
+          </div>
+          <div class="chat__control chat__control--model" title="模型">
+            <Cpu :size="14" class="chat__control-icon" />
+            <a-select
+              v-model:value="settings.activeModel"
+              size="small"
+              :bordered="false"
+              :options="groupedModels"
+              :field-names="{ label: 'label', value: 'key', options: 'items' }"
+            />
+          </div>
+          <div class="chat__control" title="强度">
+            <Zap :size="14" class="chat__control-icon" />
+            <a-select
+              v-model:value="effort"
+              size="small"
+              :bordered="false"
+              style="width: 70px"
+              :options="[
+                { value: 'low', label: '省量' },
+                { value: 'medium', label: '均衡' },
+                { value: 'high', label: '深度' },
+              ]"
+            />
+          </div>
+        </div>
+      </div>
+      <button
+        type="button"
+        class="chat__send"
+        title="发送"
+        :disabled="loading"
+        @click="triggerSend"
+      >
+        <ArrowUp :size="18" />
       </button>
     </div>
+  </div>
   </div>
 </template>
 
 <style scoped lang="less">
-.chat__input {
-  position: relative;
+.chat__composer {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin: 12px 16px 16px;
-  padding: 8px 10px;
-  background: #ffffff;
-  border: 1px solid #d1d5db;
-  border-radius: 14px;
 }
-.chat__input-top {
+.chat__input-header {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-.chat__input-top-right {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  padding: 0 16px;
+  min-height: 32px;
+}
+.chat__context-group {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #ffffff;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 .chat__project-badge {
   display: inline-flex;
   align-items: center;
-  max-width: 160px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid #d1d5db;
-  background: #f1f5f9;
-  color: #1f2937;
-  font-size: 13px;
+  gap: 6px;
+  max-width: 180px;
+  padding: 5px 12px;
+  border-right: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
   font-weight: 500;
+  cursor: default;
+  user-select: none;
+}
+.chat__project-icon {
+  flex-shrink: 0;
+  color: #64748b;
+}
+.chat__project-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  flex-shrink: 0;
+}
+.chat__project-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: default;
 }
 .chat__newproj {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  border: 1px solid #d1d5db;
-  background: #ffffff;
-  color: #475569;
+  border: none;
+  background: transparent;
+  color: #64748b;
   cursor: pointer;
-  margin-left: -6px;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 .chat__newproj:hover {
   background: #2563eb;
   color: #fff;
-  border-color: #2563eb;
 }
-.chat__select {
-  display: inline-flex;
-  align-items: center;
+.chat__newproj:focus-visible,
+.chat__context-group:focus-within {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+.chat__input {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
-  font-size: 12px;
-  color: #64748b;
+  margin: 0 16px 16px;
+  padding: 10px 14px 12px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.chat__input:focus-within {
+  border-color: #bfdbfe;
+  box-shadow: 0 4px 24px rgba(37, 99, 235, 0.1);
 }
 .chat__input textarea {
   flex: 1;
@@ -924,14 +990,14 @@ defineExpose({ clear, focusComposer });
 .chat__input-composer {
   flex: none;
   width: 100%;
-  height: 56px;
-  max-height: 56px;
-  padding: 4px 2px;
+  min-height: 56px;
+  max-height: 220px;
+  padding: 6px 2px;
   border: none;
   background: transparent;
   color: #1f2937;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 15px;
+  line-height: 1.65;
   outline: none;
   word-break: break-word;
   overflow-y: auto;
@@ -942,6 +1008,7 @@ defineExpose({ clear, focusComposer });
   content: attr(data-placeholder);
   color: #94a3b8;
   pointer-events: none;
+  font-size: 14px;
 }
 /* 内联高亮 chip（@文件 / /工具 / ✦技能 / ⌘MCP）
    使用 :deep() 以让 document.createElement 动态创建的节点也能命中样式 */
@@ -1168,10 +1235,6 @@ defineExpose({ clear, focusComposer });
   margin-bottom: 8px;
   z-index: 20;
 }
-.chat__input-bottom {
-  flex-shrink: 0;
-  display: flex;
-}
 .at-panel__toolbar {
   display: flex;
   align-items: center;
@@ -1311,36 +1374,110 @@ defineExpose({ clear, focusComposer });
 
 /* 已选命令已改为输入框内联 chip（见上方 .composer-tag），下方不再展示标签 */
 
-.chat__input-bottom {
-  display: flex;
-  justify-content: flex-end;
-}
-.chat__send {
-  height: 36px;
-  padding: 0 22px;
+.chat__input-footer {
   flex-shrink: 0;
-  background: #2563eb;
-  color: #fff;
-  border: none;
-  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 4px;
+}
+.chat__footer-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.chat__quick-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chat__quick-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #64748b;
   cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  transition: background 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.chat__quick-btn:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+.chat__controls {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
-.chat__send:hover {
-  background: #1d4ed8;
-}
-.chat__send:disabled {
-  background: #1e3a8a;
-  color: #93c5fd;
-  cursor: not-allowed;
-}
-.chat__send-icon {
+.chat__control {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
+  padding: 2px 10px 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.chat__control:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+.chat__control-icon {
+  flex-shrink: 0;
+  color: #94a3b8;
+}
+.chat__control--model {
+  max-width: 320px;
+}
+.chat__control--model :deep(.ant-select) {
+  width: auto;
+  max-width: 320px;
+}
+.chat__control :deep(.ant-select-selector) {
+  padding: 0 18px 0 0 !important;
+  background: transparent !important;
+}
+.chat__control :deep(.ant-select-selection-item) {
+  color: #475569;
+  font-weight: 500;
+}
+.chat__control :deep(.ant-select-arrow) {
+  color: #94a3b8;
+}
+.chat__send {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+  transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.chat__send:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45);
+}
+.chat__send:disabled {
+  background: #cbd5e1;
+  box-shadow: none;
+  cursor: not-allowed;
 }
 </style>

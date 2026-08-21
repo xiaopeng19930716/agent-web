@@ -142,7 +142,7 @@ onMounted(updateToBottom)
         </template>
         <template v-else>
           这是一个不关联任何项目的通用对话。<br />
-          直接提问即可；如需让 Agent 访问本地代码，点击输入框左侧「＋」添加并选择项目。
+          直接提问即可；如需让 Agent 访问本地代码，点击输入框上方「新增项目」添加并选择项目。
         </template>
       </div>
 
