@@ -1,6 +1,14 @@
 // 拉取模型列表（仅预置供应商）
 // 3 种类型（openai 兼容 / anthropic 兼容 / 原生）是通用调用范式；
 // 每个预置供应商自带 list 规则（路径/鉴权/解析），并映射到上述类型之一。
+
+// 从单个模型对象提取上下文窗口字段（OpenRouter 等供应商会在 /models 返回 context_length）
+function pickContextWindow(m) {
+  if (!m || typeof m !== 'object') return {}
+  const ctx = m.context_length || m.contextWindow || m.max_context_length
+  return ctx ? { contextWindow: Number(ctx) } : {}
+}
+
 export const MODEL_LIST_TYPE = {
   // OpenAI 兼容范式：GET {baseUrl}/models，Bearer 鉴权，解析 json.data[].id
   openai: {
@@ -12,7 +20,11 @@ export const MODEL_LIST_TYPE = {
         .map((m) =>
           typeof m === 'string'
             ? { id: m, name: m }
-            : { id: m && (m.id || m.model), name: (m && (m.name || m.id || m.model)) || (m && (m.id || m.model)) }
+            : {
+                id: m && (m.id || m.model),
+                name: (m && (m.name || m.id || m.model)) || (m && (m.id || m.model)),
+                ...pickContextWindow(m),
+              }
         )
         .filter((m) => m.id)
     },
@@ -41,12 +53,45 @@ export const MODEL_LIST_TYPE = {
       const field = rule.parseField || 'data'
       const list = Array.isArray(json[field]) ? json[field] : []
       return list
-        .map((m) => (typeof m === 'string' ? { id: m, name: m } : { id: m && (m.id || m.model), name: (m && (m.name || m.id || m.model)) || (m && (m.id || m.model)) }))
+        .map((m) =>
+          typeof m === 'string'
+            ? { id: m, name: m }
+            : {
+                id: m && (m.id || m.model),
+                name: (m && (m.name || m.id || m.model)) || (m && (m.id || m.model)),
+                ...pickContextWindow(m),
+              }
+        )
         .filter((m) => m.id)
     },
     needKey: false,
     needBaseUrl: true,
   },
+}
+
+// 常见模型上下文窗口（token）兜底表：自动获取拿不到、用户未手动填写时使用。
+// 值取官方文档常见档位，保守优先（防止爆窗优先于精确）。
+export const KNOWN_CONTEXT_WINDOWS = {
+  'qwen-coder-plus': 131072,
+  'qwen-coder-turbo': 131072,
+  'qwen-plus': 131072,
+  'qwen-max': 32768,
+  'qwen-turbo': 1000000,
+  'deepseek-chat': 128000,
+  'deepseek-reasoner': 128000,
+  'glm-4-plus': 128000,
+  'glm-4-flash': 128000,
+  'glm-4-long': 1000000,
+  'hunyuan-turbo': 32768,
+  'hunyuan-pro': 32768,
+  'gpt-4o': 128000,
+  'gpt-4o-mini': 128000,
+  'gpt-4.1': 1000000,
+  'claude-3-5-sonnet-latest': 200000,
+  'claude-3-5-haiku-latest': 200000,
+  'claude-3-opus-latest': 200000,
+  'claude-3-sonnet-20240229': 200000,
+  'claude-3-haiku-20240307': 200000,
 }
 
 // 预置供应商各自的 list 规则（按 vendor key 索引）

@@ -1,5 +1,6 @@
 import os from 'os'
 import { Router } from 'express'
+import { SystemMessage } from '@langchain/core/messages'
 import { projects } from '../lib/store.js'
 import { DEFAULT_MODEL } from '../lib/config.js'
 import { loadSkillContents } from '../lib/skills.js'
@@ -14,6 +15,16 @@ import {
 } from '../lib/chat.js'
 
 const router = Router()
+
+// 上下文压缩用的摘要提示词：把早期对话压成背景摘要，供后续轮次作为上下文注入
+const SUMMARY_PROMPT =
+  '你是一个对话压缩器。请把下面的对话压缩成简洁的中文摘要，作为后续对话的背景上下文。要求：\n' +
+  '1. 保留用户的核心目标、已做出的决策与关键结论；\n' +
+  '2. 保留具体信息：文件路径、命令、代码要点、工具调用结果中的关键结论；\n' +
+  '3. 保留尚未解决的问题与后续待办；\n' +
+  '4. 省略寒暄、客套与重复表述；\n' +
+  '5. 使用要点列表，总长度控制在 300 字以内。\n' +
+  '只输出摘要本身，不要任何前言。'
 
 // ===== 工具确认闸门（「需确认(ask)」模式）=====
 // 每个 SSE 请求持有一个 gate；后端执行高风险工具前发 tool_confirm 事件并 await ask()，
@@ -77,6 +88,33 @@ router.post('/chat/abort', (req, res) => {
   const ctrl = sessionId && abortControllers.get(sessionId)
   if (ctrl) ctrl.abort()
   res.json({ ok: !!ctrl })
+})
+
+// 上下文压缩：把早期对话压缩为摘要（独立于主对话，非流式），
+// 供前端在历史过长时调用，避免超出模型上下文窗口。
+router.post('/chat/summarize', async (req, res) => {
+  const { messages, config } = req.body || {}
+  const model = config?.model || DEFAULT_MODEL
+  const apiKey = resolveModelConfig(model).apiKey
+  if (!apiKey) {
+    res.status(500).json({ error: '未配置 API Key：请在设置面板（供应商配置）中填写并保存' })
+    return
+  }
+  if (!Array.isArray(messages) || !messages.length) {
+    res.status(400).json({ error: '缺少 messages' })
+    return
+  }
+  try {
+    const m = buildChatModel({ ...config, temperature: 0.2, maxTokens: 1024 })
+    const resp = await m.invoke([
+      new SystemMessage(SUMMARY_PROMPT),
+      ...messages.map(toLangchainMessage),
+    ])
+    const summary = typeof resp.content === 'string' ? resp.content : JSON.stringify(resp.content)
+    res.json({ summary })
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) })
+  }
 })
 
 router.post('/chat', async (req, res) => {

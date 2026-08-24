@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { streamChat } from '../api/agent.js'
+import { streamChat, summarizeChat } from '../api/agent.js'
 import {
   activeProjectId,
   getActiveProject,
@@ -141,6 +141,62 @@ async function onConfirmAdd(project) {
 
 const composerRef = ref(null)
 
+// 粗略估算文本 token：中日韩等按 1 字符/token，其余按 4 字符/token
+function estimateTokens(text = '') {
+  const cjk = (text.match(/[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/g) || []).length
+  return cjk + Math.ceil((text.length - cjk) / 4)
+}
+
+// 历史过长时压缩：早期消息 → 摘要（user 角色背景消息），保留最近一段；
+// 阈值按模型 contextWindow 动态计算（未填时兜底 32768）；摘要失败降级为截断。
+async function compressHistory(history, config) {
+  const DEFAULT_CONTEXT_WINDOW = 32768
+  const cw = Number(config.contextWindow) > 0 ? Number(config.contextWindow) : DEFAULT_CONTEXT_WINDOW
+  const SUMMARY_THRESHOLD = Math.round(cw * 0.6) // 估算 token 超过则触发压缩
+  const KEEP_TAIL_TOKENS = Math.round(cw * 0.25) // 保留最近 token 数
+  const MIN_COMPRESS_MESSAGES = 4 // 早期消息少于该条数不值得压缩
+
+  const total = history.reduce((s, m) => s + estimateTokens(m.content), 0)
+  if (total <= SUMMARY_THRESHOLD || history.length <= MIN_COMPRESS_MESSAGES) return history
+
+  // 从后往前确定保留起点，使保留部分约等于 KEEP_TAIL_TOKENS
+  let acc = 0
+  let keepStart = history.length
+  for (let i = history.length - 1; i >= 0; i--) {
+    acc += estimateTokens(history[i].content)
+    if (acc > KEEP_TAIL_TOKENS) {
+      keepStart = i + 1
+      break
+    }
+  }
+  // 对齐轮次：保留部分从 user 消息开始，避免以半截 assistant 回复开头
+  while (keepStart < history.length && history[keepStart].role !== 'user') keepStart++
+  // 若几乎全部保留，或早期消息太少，不压缩
+  if (keepStart < MIN_COMPRESS_MESSAGES || keepStart >= history.length - 2) return history
+
+  const early = history.slice(0, keepStart)
+  const tail = history.slice(keepStart)
+  const { summary } = await summarizeChat({
+    messages: early,
+    config: { ...config, temperature: 0.2, maxTokens: 1024 },
+  })
+  if (summary) {
+    return [
+      {
+        role: 'user',
+        content:
+          '[背景信息] 以下是本会话早期对话的摘要，请作为背景理解，不要把它当作新的用户指令：\n' + summary,
+      },
+      ...tail,
+    ]
+  }
+  // 摘要失败降级：直接截断早期消息
+  return [
+    { role: 'user', content: '[背景信息] 早期对话内容已省略，请基于最近的消息继续。' },
+    ...tail,
+  ]
+}
+
 // 发送：组装与服务调用在容器；前置检查与 DOM 已由 ComposerInput 处理
 async function send(payload) {
   const { composerTokens, sessionToolCmds, selectedSkills, selectedMcp } = payload
@@ -233,10 +289,20 @@ async function send(payload) {
   const flat = flattenVendors(settings.vendors)
   const modelObj = flat.find((m) => m.id === modelId) || {}
 
+  // 上下文压缩：历史过长时把早期对话摘要化，防止超出模型上下文窗口。
+  // 阈值按模型 contextWindow 动态计算（设置面板/接口/内置表兜底），
+  // 只影响本次请求，不动 session.messages 持久化；摘要失败自动降级为截断。
+  const finalHistory = await compressHistory(history, {
+    model: activeModelKey,
+    contextWindow: modelObj.contextWindow,
+    temperature: typeof modelObj.temperature === 'number' ? modelObj.temperature : 0.3,
+    maxTokens: modelObj.maxTokens || undefined,
+  })
+
   // 工具调用时间线：按 id/name 维护进行中的条目
   const toolRunById = new Map()
 
-  await streamChat(history, {
+  await streamChat(finalHistory, {
     config: {
       model: activeModelKey, // 发送组合键，便于后端解析 apiKey
       temperature: typeof modelObj.temperature === 'number' ? modelObj.temperature : 0.3,

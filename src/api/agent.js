@@ -258,3 +258,19 @@ export async function abortChat({ sessionId }) {
     // 忽略网络错误（后端可能已随断流关闭）
   }
 }
+
+// 上下文压缩：请求后端把早期对话压缩为摘要（非流式），供历史过长时替换早期消息
+export async function summarizeChat({ messages, config }) {
+  try {
+    const resp = await fetch('/api/chat/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages, config }),
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) return { summary: '', error: data.error || `请求失败: ${resp.status}` }
+    return { summary: data.summary || '', error: '' }
+  } catch (err) {
+    return { summary: '', error: String(err) }
+  }
+}

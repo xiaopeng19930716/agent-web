@@ -62,7 +62,7 @@ const isPreset = computed(() => !isNew.value && !activeVendor.value?.isCustomVen
 // 预置供应商 key 集合（作为保留命名空间：自定义供应商 Key 不得与之重复，即使该预置未注入 settings.vendors）
 const PRESET_VENDOR_KEYS = new Set(PRESET_VENDORS.map((v) => v.key))
 
-const emptyRow = () => ({ name: '', id: '', maxTokens: '', temperature: 0.3 })
+const emptyRow = () => ({ name: '', id: '', maxTokens: '', contextWindow: '', temperature: 0.3 })
 const form = reactive({ name: '', website: '', vendorKey: '', baseUrl: '', apiKey: '', platform: 'openai', modelRows: [emptyRow()] })
 
 // 模型 ID 下拉选项（来自「获取模型列表」），供 a-auto-complete 选择
@@ -76,10 +76,13 @@ function idToName(s) {
     .replace(/-/g, ' ')
     .replace(/(^|\s)(\w)/g, (_, sp, c) => sp + c.toUpperCase())
 }
-// 在下拉中选择模型 ID 时，自动把模型名称按规则填充
+// 在下拉中选择模型 ID 时，自动把模型名称按规则填充；
+// 若「获取模型列表」带出了 contextWindow，一并自动填入（用户仍可手动修改）
 function onModelIdSelect(row, val) {
   row.id = val
   row.name = idToName(val)
+  const hit = modelIdOptions.value.find((o) => o.value === val)
+  if (hit && hit.contextWindow && !row.contextWindow) row.contextWindow = hit.contextWindow
 }
 
 const modelsOfVendor = computed(() => {
@@ -91,6 +94,7 @@ const modelsOfVendor = computed(() => {
     baseUrl: (m && m.baseUrl) || (v.options && v.options.baseURL) || '',
     apiKey: (m && m.apiKey) || (v.options && v.options.apiKey) || '',
     maxTokens: (m && m.maxTokens) ?? '',
+    contextWindow: (m && m.contextWindow) ?? '',
     temperature: (m && m.options && typeof m.options.temperature === 'number') ? m.options.temperature : 0.3,
   }))
 })
@@ -134,7 +138,7 @@ function selectVendor(key) {
       baseUrl: saved && saved.baseUrl ? saved.baseUrl : (vendorBase || (vendor ? presetBaseUrl(vendor, platform) : '')),
       apiKey: saved && saved.apiKey ? saved.apiKey : (vendorKey || ''),
       platform,
-      modelRows: rows.length ? rows.map((m) => ({ name: m.name, id: m.id, maxTokens: m.maxTokens ?? '', temperature: m.temperature })) : [emptyRow()],
+      modelRows: rows.length ? rows.map((m) => ({ name: m.name, id: m.id, maxTokens: m.maxTokens ?? '', contextWindow: m.contextWindow ?? '', temperature: m.temperature })) : [emptyRow()],
     })
   }
   // 新增供应商或未配置过的供应商 → 直接进入编辑态；已配置 → 查看态
@@ -264,6 +268,7 @@ async function save() {
       ...(form.baseUrl.trim() ? { baseUrl: form.baseUrl.trim() } : {}),
       ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
       ...(toNumber(r.maxTokens) ? { maxTokens: toNumber(r.maxTokens) } : {}),
+      ...(toNumber(r.contextWindow) ? { contextWindow: toNumber(r.contextWindow) } : {}),
       options: opt,
     }
   }
@@ -352,8 +357,8 @@ async function fetchModels() {
       message.error('该接口未返回任何模型')
       return
     }
-    // 将获取到的模型 ID 填入下拉，供各模型行的 a-autocomplete 选择
-    modelIdOptions.value = models.map((m) => ({ value: m.id, label: m.id }))
+    // 将获取到的模型 ID 填入下拉，供各模型行的 a-autocomplete 选择（带 contextWindow，选中时自动填入）
+    modelIdOptions.value = models.map((m) => ({ value: m.id, label: m.id, contextWindow: m.contextWindow }))
     message.success(`已获取 ${models.length} 个模型，已加入模型 ID 下拉，可在各行选择`)
   } finally {
     fetchLoading.value = false
@@ -492,7 +497,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
         </label>
         <div>
           <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-semibold text-gray-700">模型（名称 / ID / Max Tokens，可添加多组）</span>
+            <span class="text-xs font-semibold text-gray-700">模型（名称 / ID / Max Tokens / 上下文窗口，可添加多组）</span>
             <button
               type="button"
               :disabled="!editing || fetchLoading"
@@ -531,6 +536,15 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
                 placeholder="Max Tokens"
                 size="middle"
                 class="w-28"
+                :disabled="!editing"
+              />
+              <a-input-number
+                v-model:value="row.contextWindow"
+                :min="1024"
+                :step="1024"
+                placeholder="上下文窗口"
+                size="middle"
+                class="w-32"
                 :disabled="!editing"
               />
               <button

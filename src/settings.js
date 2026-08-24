@@ -156,6 +156,7 @@ export function flattenVendors(vendors) {
         apiKey: (m && m.apiKey) || (v.options && v.options.apiKey) || '',
         temperature: (m && m.options && typeof m.options.temperature === 'number') ? m.options.temperature : 0.3,
         maxTokens: (m && m.maxTokens) || undefined,
+        contextWindow: (m && m.contextWindow) || undefined,
         modalities: (m && m.modalities) || undefined,
       })
     }
