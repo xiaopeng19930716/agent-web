@@ -303,7 +303,7 @@ function setText(text) {
   if (composerEl.value) composerEl.value.textContent = text || ''
 }
 
-defineExpose({ clear, focusComposer, setText });
+defineExpose({ clear, focusComposer, setText, triggerSend });
 </script>
 
 <template>

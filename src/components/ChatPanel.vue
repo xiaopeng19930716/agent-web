@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { streamChat, summarizeChat } from '../api/agent.js'
 import {
@@ -401,7 +401,8 @@ async function send(payload) {
 function parseFileOp(result, name) {
   if (name !== 'writeFile' && name !== 'editFile') return null
   if (typeof result !== 'string') return null
-  const m = result.match(/backupId=(.*?)(?:\s*$)/)
+  // backupId 值不能含空格或 |，避免把 "| created=1" 误吞进来
+  const m = result.match(/backupId=([^\s|]*)/)
   const backupId = m ? m[1].trim() : ''
   const fm = result.match(/:\s*(.+?)\s*\|/)
   const filePath = fm ? fm[1].trim() : ''
@@ -422,21 +423,25 @@ async function rollbackTo(msg) {
 
   // 截断前，先收集被删消息里所有写/编辑操作的文件信息
   const removed = session.messages.slice(idx)
-  const ops = []
+  // 同一文件只保留首次出现的 op（回退语义：以区间内第一条操作为准，见后端 restore-batch）
+  const firstOp = new Map()
   for (const m of removed) {
     if (m.role !== 'assistant') continue
     for (const t of (m.toolCalls || [])) {
       const op = parseFileOp(t.result, t.name)
-      if (op) ops.push(op)
+      if (op && !firstOp.has(op.filePath)) firstOp.set(op.filePath, op)
     }
   }
+  const ops = [...firstOp.values()]
 
   // 截断到该 user 消息之前（不包含它），对话中该消息消失
   await truncateSession(session.id, idx)
 
   // 文件回退：有备份则还原，新建文件则删除
+  // 必须取会话所属 projectId，而不是当前 UI 选中的项目，否则可能删错目录或删空。
+  // projectId 为空时后端回退到用户主目录（与工具执行边界一致）。
+  const projectId = session.projectId === NO_PROJECT_KEY ? '' : session.projectId
   if (ops.length) {
-    const projectId = activeProjectId.id || ''
     try {
       const r = await restoreBatch(projectId, ops)
       if (!r.ok) error.value = r.error || '文件回退失败'
@@ -465,12 +470,13 @@ async function regenerate(msg) {
   if (idx < 0) return
   // 截断到该 assistant 之前（保留前文），再触发一次发送
   await truncateSession(session.id, idx)
-  // 复用发送流程：把"前一条 user 消息"作为本次输入重新提交
+  // 复用发送流程：把"前一条 user 消息"作为本次输入重新提交。
+  // 通过 triggerSend() 让输入框自行 syncTokens() 组装 composerTokens，避免直接调 send() 缺参。
   const prevUser = [...session.messages].reverse().find((m) => m.role === 'user')
   if (!prevUser) return
   composerRef.value?.setText(prevUser.content || '')
-  composerRef.value?.focusComposer()
-  await send()
+  await nextTick()
+  composerRef.value?.triggerSend()
 }
 
 // 文件回退：把一次写/编辑操作前的自动备份还原回原文件

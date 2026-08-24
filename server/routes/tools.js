@@ -31,16 +31,25 @@ router.post('/restore', (req, res) => {
 })
 
 // 批量文件回退：对话回退时，把被截断消息里的所有写/编辑操作一并回退。
-// body: { projectId, ops: [{ filePath, backupId }] }
-//   backupId 非空 -> 还原备份；backupId 为空(新建文件) -> 删除该文件。
+// body: { projectId, ops: [{ filePath, backupId }] }（ops 按时间正序传入）
+// 关键：同一文件在区间内可能出现多次（新建后又被覆盖）。回退到该点之前，
+// 文件的最终状态只由「区间内第一条操作它的 op」决定：
+//   - 第一条 op 是新建(backupId 为空) -> 该文件在回退点尚不存在，应删除
+//   - 第一条 op 是覆盖(有 backupId)   -> 还原到那次覆盖之前
+// 因此按 filePath 去重，只保留首次出现的 op，避免「先删后还原」把文件复活。
 router.post('/restore-batch', (req, res) => {
   try {
     const { projectId, ops } = req.body || {}
     const root = projectId && projects.get(projectId) ? projects.get(projectId).path : os.homedir()
-    const results = []
+    const seen = new Map()
     for (const op of Array.isArray(ops) ? ops : []) {
-      const { filePath, backupId } = op || {}
-      if (!filePath) continue
+      if (!op || !op.filePath) continue
+      if (seen.has(op.filePath)) continue // 同文件只取第一条 op
+      seen.set(op.filePath, op)
+    }
+    const results = []
+    for (const op of seen.values()) {
+      const { filePath, backupId } = op
       if (backupId) {
         const restored = restoreBackup(root, backupId)
         results.push({ filePath, action: 'restored', restored })
