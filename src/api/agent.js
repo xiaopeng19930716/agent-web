@@ -1,13 +1,13 @@
 // 调用本地后端，后端再流式转发百炼云
 export async function streamChat(
   messages,
-  { config, projectId, permission, effort, tools, skills, mcpServers, onDelta, onReasoning, onToolCall, onDone, onError } = {}
+  { config, projectId, permission, effort, tools, skills, mcpServers, sessionId, onDelta, onReasoning, onToolCall, onToolConfirm, onDone, onError } = {}
 ) {
   try {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, config, projectId, permission, effort, tools, skills, mcpServers }),
+      body: JSON.stringify({ messages, config, projectId, permission, effort, tools, skills, mcpServers, sessionId }),
     })
 
     if (!resp.ok) {
@@ -50,6 +50,10 @@ export async function streamChat(
           }
           if (json.type === 'tool_call') {
             onToolCall?.(json)
+            continue
+          }
+          if (json.type === 'tool_confirm') {
+            onToolConfirm?.(json)
             continue
           }
           const delta = json.choices?.[0]?.delta?.content || ''
@@ -223,5 +227,21 @@ export async function searchProjectFiles(projectId, keyword) {
     return { results: data.results || [], error: '' }
   } catch (err) {
     return { results: [], error: String(err) }
+  }
+}
+
+// 「需确认(ask)」模式下，用户对被暂停的高风险工具调用做出允许/拒绝决定
+export async function confirmToolCall({ sessionId, id, decision }) {
+  try {
+    const resp = await fetch('/api/chat/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, id, decision }),
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) return { ok: false, error: data.error || `请求失败: ${resp.status}` }
+    return { ok: !!data.ok }
+  } catch (err) {
+    return { ok: false, error: String(err) }
   }
 }

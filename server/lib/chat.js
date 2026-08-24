@@ -72,6 +72,13 @@ function buildPermissionSection(permission) {
         '\n\n当前权限模式：不允许。你不能使用任何文件读写或命令执行工具，只能基于既有上下文进行讨论与建议。' +
         '若用户要求操作文件或运行命令，请明确告知「当前未授予文件操作权限」。'
       )
+    case 'ask':
+      return (
+        '\n\n当前权限模式：需确认。你仍可正常调用全部工具（含写文件、编辑文件、执行命令），' +
+        '但凡是写文件、编辑文件或执行命令类操作，在真正执行前会暂停并弹出确认请求，由用户选择「允许」或「拒绝」。' +
+        '因此你直接调用工具即可，无需在文本里反复询问用户；若用户拒绝，你会收到拒绝反馈并应改用更安全的方案或向用户说明。' +
+        '对破坏性命令（如 rm -rf、格式化、强制推送）即便用户允许也会被系统拦截，请主动避免。'
+      )
     default:
       return (
         '\n\n当前权限模式：完全访问。你可使用全部工具（含写文件与执行命令），但请遵守安全边界（见核心准则第 8 条），' +
@@ -83,7 +90,11 @@ function buildPermissionSection(permission) {
 // 根据是否关联项目生成上下文段（保持中性，不预设项目类型）
 function buildProjectSection(projectRoot) {
   if (!projectRoot) {
-    return '\n\n当前没有关联项目（通用对话模式）。你仍可回答编程问题、给出示例与建议，但不应假设存在某个本地项目文件。'
+    return (
+      '\n\n当前没有关联项目（通用对话模式）。你仍可回答编程问题、给出示例与建议，但不应假设存在某个本地项目文件。' +
+      '本地文件读写、编辑与命令执行工具在此模式下不可用。若用户要求你创建、读取、修改文件或运行命令，' +
+      '请明确告知「当前为通用对话模式，未关联项目，无法操作本地文件」，并引导用户先在界面顶部关联（或新建）一个项目后再试。'
+    )
   }
   return '\n\n当前已关联一个本地项目，涉及文件操作时以其为根。'
 }
@@ -127,7 +138,14 @@ export function buildChatModel(cfg, callbacks) {
 // Agent 主循环：多轮「模型推理 → 工具调用 → 回灌结果」直至模型不再请求工具
 // 全程流式输出到 res（reasoning 增量 + 正文增量 + 工具调用结构化事件）
 export async function runAgent(model, history, projectRoot, res, permission = 'full', callbacks, opts = {}) {
-  const { enabledTools, skillPrompts = [], mcpTools = [], mcpServers = {}, effortHint = '' } = opts
+  const {
+    enabledTools,
+    skillPrompts = [],
+    mcpTools = [],
+    mcpServers = {},
+    effortHint = '',
+    confirmGate = null, // 「需确认(ask)」模式下的确认闸门；非 ask 时为 null
+  } = opts
   const { modelWithTools, toolMap } = buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools, mcpServers)
   const messages = buildSystemMessages(history, skillPrompts, effortHint, { permission, projectRoot })
 
@@ -146,7 +164,7 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
 
     // 逐个执行工具，并将结果回灌为 ToolMessage，供下一轮模型参考
     for (const call of toolCalls) {
-      const result = await executeToolCall(call, toolMap, res)
+      const result = await executeToolCall(call, toolMap, res, { permission, confirmGate })
       messages.push(new ToolMessage({ content: result, tool_call_id: call.id }))
     }
   }
@@ -208,16 +226,60 @@ async function streamModelTurn(modelWithTools, messages, res, callbacks) {
 }
 
 // 执行单个工具调用：发出 start/end 结构化事件并返回结果字符串
-async function executeToolCall(call, toolMap, res) {
+// options.confirmGate：ask 模式下的确认闸门（非 ask 模式不传，直接执行）
+async function executeToolCall(call, toolMap, res, options = {}) {
+  const { permission = 'full', confirmGate = null } = options
+  const tool = toolMap[call.name]
+
   res.write(`data: ${JSON.stringify({ type: 'tool_call', name: call.name, args: call.args, status: 'start' })}\n\n`)
+
+  // 危险命令强制拦截（即便用户/模型允许也拒绝），与 executeCommand 内部规则保持一致
+  if (call.name === 'executeCommand' && isDangerousCommand(call.args && call.args.command)) {
+    const denied = '已拒绝执行：检测到破坏性/高风险命令（' + (call.args.command || '') + '），系统已强制拦截。请改用更安全的操作。'
+    res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'denied', result: denied })}\n\n`)
+    return denied
+  }
+
+  // ask 模式 + 高风险工具 -> 暂停等待用户确认
+  const needConfirm = permission === 'ask' && confirmGate && tool && (tool.risk === 'write' || tool.risk === 'danger')
+  if (needConfirm) {
+    const decision = await confirmGate.ask(call.id, call.name, call.args)
+    if (decision === 'deny') {
+      const denied = '用户拒绝了该工具调用（' + call.name + '）。请向用户说明，并改用其他安全方案或停止该操作。'
+      res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'denied', result: denied })}\n\n`)
+      return denied
+    }
+  }
+
   let result
   try {
-    result = toolMap[call.name] ? await toolMap[call.name].invoke(call.args) : '未知工具: ' + call.name
+    result = tool ? await tool.invoke(call.args) : '未知工具: ' + call.name
   } catch (e) {
     result = '工具执行错误: ' + String(e.message || e)
   }
   res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'end', result: String(result) })}\n\n`)
   return String(result)
+}
+
+// 破坏性命令识别：与 executeCommand 安全边界一致（不可绕过）
+function isDangerousCommand(command) {
+  if (!command || typeof command !== 'string') return false
+  const c = command.trim()
+  const patterns = [
+    /\brm\s+-rf\b/,
+    /\brm\s+-fr\b/,
+    /\brmdir\s+\/s\b/i,
+    /\bformat\s+/i,
+    /\bshutdown\b/i,
+    /\bmkfs\b/,
+    /\bgit\s+push\b[^\n]*--force/,
+    /\bgit\s+push\b[^\n]*-f\b/,
+    /\bgit\s+reset\b[^\n]*--hard/,
+    /\bdel\s+\/[sq]/i,
+    />\s*\/dev\/sd/,
+    /\bdd\b[^\n]*\bof=\/dev/,
+  ]
+  return patterns.some((p) => p.test(c))
 }
 
 // 解析工具参数 JSON，解析失败则回退为空对象（保证后续流程不崩）

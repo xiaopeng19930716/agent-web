@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted } from "vue";
 import { Plus, ArrowUp, Shield, Zap, AtSign, Hash, FolderOpen } from "lucide-vue-next";
 import { settings, saveModels } from "../../settings.js";
+import { activeProjectId } from "../../projects.js";
 import { fetchFileTools } from "../../api/agent.js";
 import ModelControl from "./ModelControl.vue";
 import ComposerCmdPanel from "./ComposerCmdPanel.vue";
@@ -33,6 +34,22 @@ const effort = computed({
 const permission = computed({
   get: () => settings.permission || "full",
   set: (v) => (settings.permission = v),
+});
+
+// 是否关联了项目：无项目时本地文件/命令工具不可用，权限无意义，下拉收敛为一项灰显“沙箱”
+// 注：projects.js 中 activeProjectId 是 reactive({ id }),不是 ref,因此读 .id(不要 .value)
+const permissionOptions = computed(() => {
+  if (!activeProjectId.id) {
+    return [
+      { value: "none", label: "沙箱(无项目)", disabled: true },
+    ];
+  }
+  return [
+    { value: "full", label: "完全访问" },
+    { value: "ask", label: "需确认" },
+    { value: "read-only", label: "只读" },
+    { value: "none", label: "不允许" },
+  ];
 });
 
 function syncTokens() {
@@ -329,7 +346,7 @@ defineExpose({ clear, focusComposer });
       <div class="chat__input-footer">
         <div class="chat__footer-left">
           <div class="chat__quick-actions">
-            <button type="button" class="chat__quick-btn" title="引用文件/目录" @click="insertText('@')">
+            <button v-if="activeProjectId.id" type="button" class="chat__quick-btn" title="引用文件/目录" @click="insertText('@')">
               <AtSign :size="14" />
             </button>
             <button type="button" class="chat__quick-btn" title="选择工具" @click="insertText('/')">
@@ -337,17 +354,13 @@ defineExpose({ clear, focusComposer });
             </button>
           </div>
           <div class="chat__controls">
-            <div class="chat__control" title="权限">
+            <div v-if="activeProjectId.id" class="chat__control" title="权限">
               <Shield :size="14" class="chat__control-icon" />
               <a-select
                 v-model:value="permission"
                 size="small"
                 :bordered="false"
-                :options="[
-                  { value: 'full', label: '完全访问' },
-                  { value: 'read-only', label: '只读' },
-                  { value: 'none', label: '不允许' },
-                ]"
+                :options="permissionOptions"
               />
             </div>
             <ModelControl />

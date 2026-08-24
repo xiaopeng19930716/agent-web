@@ -23,9 +23,29 @@ import ChatHeader from './chat/ChatHeader.vue'
 import MessageList from './chat/MessageList.vue'
 import ComposerInput from './chat/ComposerInput.vue'
 import AddProjectModal from './chat/AddProjectModal.vue'
+import { confirmToolCall } from '../api/agent.js'
 
 const error = ref('')
 const loading = ref(false)
+
+// 「需确认(ask)」模式：后端暂停高风险工具，等待用户允许/拒绝；保存当前待确认的工具调用
+const toolConfirm = ref(null)
+async function handleToolConfirm(decision) {
+  const t = toolConfirm.value
+  toolConfirm.value = null
+  if (!t) return
+  await confirmToolCall({ sessionId: sessions.activeSessionId, id: t.id, decision })
+}
+
+// 确认弹窗中把工具参数格式化为可读文本（命令/路径等）
+function formatToolArgs(args) {
+  if (!args) return ''
+  try {
+    return JSON.stringify(args, null, 2)
+  } catch {
+    return String(args)
+  }
+}
 
 // 思考强度 / 权限级别（共享 settings 实例）
 const effort = computed({
@@ -221,6 +241,15 @@ async function send(payload) {
     tools: fileTools,
     skills: skillIds,
     mcpServers: Object.keys(mcpServersPayload).length ? mcpServersPayload : undefined,
+    sessionId: sessions.activeSessionId, // 「需确认」模式回传确认用
+    onToolConfirm: (payload) => {
+      // 后端暂停高风险工具，等待用户在 Modal 中允许/拒绝
+      toolConfirm.value = {
+        id: payload.id,
+        name: payload.name,
+        args: payload.args || {},
+      }
+    },
     onReasoning: (text) => {
       assistant.reasoning += text
     },
@@ -324,6 +353,26 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
       :session="activeSession"
       @update:open="showLog = $event"
     />
+
+    <!-- 「需确认(ask)」模式：高风险工具执行前弹窗，等待用户允许/拒绝 -->
+    <a-modal
+      :open="!!toolConfirm"
+      title="工具调用需确认"
+      :closable="false"
+      :mask-closable="false"
+      ok-text="允许"
+      cancel-text="拒绝"
+      @ok="handleToolConfirm('allow')"
+      @cancel="handleToolConfirm('deny')"
+    >
+      <p v-if="toolConfirm" style="margin-bottom: 8px">
+        助手请求执行 <strong>{{ toolConfirm.name }}</strong> 工具，请确认是否允许：
+      </p>
+      <pre
+        v-if="toolConfirm"
+        style="max-height: 280px; overflow: auto; background: #f6f8fa; padding: 10px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; font-size: 12px"
+        >{{ formatToolArgs(toolConfirm.args) }}</pre>
+    </a-modal>
   </div>
 </template>
 

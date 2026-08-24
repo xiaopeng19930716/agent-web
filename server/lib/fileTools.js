@@ -358,6 +358,20 @@ export function buildTools(root, permission = 'full', toolKeys, mcpServers = {})
       }
     ),
   ]
+  // 风险分级：供「需确认(ask)」权限在工具真正执行前发起用户确认
+  // read=只读(免确认) / write=写文件(需确认) / danger=执行命令(需确认,且危险命令强制拒绝)
+  const RISK = {
+    listFiles: 'read',
+    readFile: 'read',
+    writeFile: 'write',
+    editFile: 'write',
+    searchInProject: 'read',
+    executeCommand: 'danger',
+    listMcp: 'read',
+    listSkills: 'read',
+  }
+  for (const t of all) t.risk = RISK[t.name] || 'read'
+
   if (!Array.isArray(toolKeys)) return all
   // 信息查询类工具（listSkills / listMcp）无副作用、不写文件，始终对模型可见，
   // 即使用户没有通过「/选择工具」显式启用。这样询问"我有哪些 skills/mcp"
