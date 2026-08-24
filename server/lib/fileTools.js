@@ -5,6 +5,33 @@ import { exec } from 'child_process'
 import { promisify } from 'util'
 import { tool } from '@langchain/core/tools'
 import { scanSkills } from './skills.js'
+import { MCP_FILE, readConfigFile } from './config.js'
+
+// 从服务端 MCP 配置文件中读取已启用的 MCP 服务器列表。
+// 这样 listMcp 反映的是磁盘真实状态，而不是前端这次会话是否传过来。
+// 同时兼容旧数组格式 [{ name, type, command, url, enabled }] 与新对象格式 { [name]: { type, command, url } }。
+function readEnabledMcpServers() {
+  const raw = readConfigFile(MCP_FILE)
+  if (!raw || typeof raw !== 'object') return {}
+  const disabled = Array.isArray(raw.disabledMcpServers) ? raw.disabledMcpServers : []
+  const out = {}
+  if (raw.mcpServers && typeof raw.mcpServers === 'object' && !Array.isArray(raw.mcpServers)) {
+    // 新格式：对象
+    for (const [name, cfg] of Object.entries(raw.mcpServers)) {
+      if (!cfg || typeof cfg !== 'object') continue
+      if (disabled.includes(name)) continue
+      out[name] = cfg
+    }
+  } else if (Array.isArray(raw.mcpServers)) {
+    // 旧格式：数组
+    for (const it of raw.mcpServers) {
+      if (!it || !it.name) continue
+      if (it.enabled === false || disabled.includes(it.name)) continue
+      out[it.name] = it
+    }
+  }
+  return out
+}
 
 const execAsync = promisify(exec)
 // 命令输出截断上限，避免超大输出（如 build 日志）撑爆模型上下文
@@ -287,14 +314,22 @@ export function buildTools(root, permission = 'full', toolKeys, mcpServers = {})
     // 以下两个工具不依赖项目根，可在无项目时直接使用
     tool(
       async () => {
-        const servers = mcpServers && typeof mcpServers === 'object' ? mcpServers : {}
+        // 直接从服务端 MCP 配置文件读取已启用的服务器，
+        // 不依赖本次会话前端是否传了 mcpServers（用户没通过 / 选择时也不会漏报）。
+        const servers = readEnabledMcpServers()
         const entries = Object.entries(servers)
         if (entries.length === 0) return '(未配置任何 MCP 服务器)'
         return entries
           .map(([name, cfg]) => {
             const type = cfg && cfg.type ? cfg.type : 'unknown'
-            const enabled = !(cfg && cfg.enabled === false)
-            return `- ${name} [${type}] ${enabled ? '已启用' : '已停用'}`
+            const kind = cfg && cfg.command ? 'local' : cfg && cfg.url ? cfg.type || 'http' : 'unknown'
+            const transport =
+              kind === 'local' || kind === 'stdio'
+                ? 'local'
+                : kind === 'sse'
+                ? 'sse'
+                : 'http'
+            return `- ${name} [${transport}] 已启用`
           })
           .join('\n')
       },

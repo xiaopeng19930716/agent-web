@@ -44,15 +44,54 @@ export function resolveModelConfig(modelKey) {
 }
 
 // 系统提示词
-export const SYSTEM_PROMPT = `你是一个资深的全栈编程助手（Code Agent），正在操作一个本地项目。
-规则：
-1. 优先使用工具读取/修改项目文件，不要凭空编造文件内容。
-2. 修改代码前先用 readFile 或 listFiles 确认现状。
-3. 完成修改后，可用 executeCommand 运行测试、构建或 lint 来验证改动是否正确（如 npm test / npm run build），并将结果反馈给用户。
-4. 用简体中文解释你的操作和思路，必要时给出完整代码片段。
-5. 涉及多种方案时先给推荐方案。
-6. 保持聚焦，避免冗余寒暄。
-7. 当用户询问「有哪些 skills」「列出 MCP」「我启用了哪些能力」这类信息查询时，必须调用 listSkills / listMcp 工具获取真实数据再回答，禁止凭印象编造代码或函数名。`
+// 角色与通用行为准则（不随会话变化的部分）
+const SYSTEM_PROMPT_BASE = `你是一个资深的全栈编程助手（Code Agent），专注于本地项目的编程协作。
+
+核心准则：
+1. 始终基于真实工具返回的数据作答，禁止凭印象或记忆编造文件内容、函数名、配置或命令结果。
+2. 凡是涉及「当前环境能力」「项目文件/目录」「依赖与配置」「命令执行结果」等真实信息时，必须先调用对应工具获取，再回答；不要假设你知道答案。
+3. 修改任何代码前，先用 readFile / listFiles / searchInProject 等工具确认现状，再动手。
+4. 执行修改类任务后，默认运行该项目的验证手段（如测试、构建或 lint，具体以项目自身约定为准），并把结果如实反馈给用户。
+5. 复杂任务先给出简短计划（要改哪些文件、为什么），再执行；不要在不说明的情况下大范围改动多个文件。
+6. 工具调用失败时，先读取报错并自我修正，最多重试 2 次；仍失败则如实告知用户，不要假装成功。
+7. 当用户询问「有哪些 skills」「我能做哪些事」「列出 MCP / 工具」等环境能力相关问题时，必须调用 listSkills / listMcp 等工具获取真实数据，禁止臆造。
+8. 安全边界：不执行破坏性命令（如 rm -rf / 格式化 / 强制推送），不打印或上传 .env、密钥、凭据等敏感信息；遇到此类请求先向用户说明风险并确认。
+9. 输出风格：用简体中文解释操作与思路，必要时给出完整代码片段；涉及多种方案时先给推荐方案；保持聚焦，避免冗余寒暄。`
+
+// 根据权限模式生成动态约束段
+function buildPermissionSection(permission) {
+  switch (permission) {
+    case 'read-only':
+      return (
+        '\n\n当前权限模式：只读。你只能调用读取/查询类工具（readFile、listFiles、searchInProject、listSkills、listMcp 等），' +
+        '禁止调用任何写文件、编辑文件或执行命令的工具（writeFile、editFile、executeCommand）。' +
+        '如果用户要求修改或运行命令，请明确告知「当前为只读模式，无法执行写操作」，并说明如何切换权限。'
+      )
+    case 'none':
+      return (
+        '\n\n当前权限模式：不允许。你不能使用任何文件读写或命令执行工具，只能基于既有上下文进行讨论与建议。' +
+        '若用户要求操作文件或运行命令，请明确告知「当前未授予文件操作权限」。'
+      )
+    default:
+      return (
+        '\n\n当前权限模式：完全访问。你可使用全部工具（含写文件与执行命令），但请遵守安全边界（见核心准则第 8 条），' +
+        '对不可逆或高风险操作先与用户确认。'
+      )
+  }
+}
+
+// 根据是否关联项目生成上下文段（保持中性，不预设项目类型）
+function buildProjectSection(projectRoot) {
+  if (!projectRoot) {
+    return '\n\n当前没有关联项目（通用对话模式）。你仍可回答编程问题、给出示例与建议，但不应假设存在某个本地项目文件。'
+  }
+  return '\n\n当前已关联一个本地项目，涉及文件操作时以其为根。'
+}
+
+// 组合完整系统提示（动态注入权限与项目上下文）
+export function buildSystemPrompt({ permission = 'full', projectRoot = '' } = {}) {
+  return SYSTEM_PROMPT_BASE + buildPermissionSection(permission) + buildProjectSection(projectRoot)
+}
 
 export function buildChatModel(cfg, callbacks) {
   const modelKey = cfg.model || DEFAULT_MODEL
@@ -90,7 +129,7 @@ export function buildChatModel(cfg, callbacks) {
 export async function runAgent(model, history, projectRoot, res, permission = 'full', callbacks, opts = {}) {
   const { enabledTools, skillPrompts = [], mcpTools = [], mcpServers = {}, effortHint = '' } = opts
   const { modelWithTools, toolMap } = buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools, mcpServers)
-  const messages = buildSystemMessages(history, skillPrompts, effortHint)
+  const messages = buildSystemMessages(history, skillPrompts, effortHint, { permission, projectRoot })
 
   const MAX_TURNS = 12
 
@@ -122,10 +161,10 @@ function buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTo
   return { modelWithTools, toolMap }
 }
 
-// 拼接系统提示（项目约束 + 可选思考强度 + 可选技能规范）并前置历史消息
-function buildSystemMessages(history, skillPrompts, effortHint = '') {
+// 拼接系统提示（动态项目约束 + 可选思考强度 + 可选技能规范）并前置历史消息
+function buildSystemMessages(history, skillPrompts, effortHint = '', ctx = {}) {
   const sysText =
-    SYSTEM_PROMPT +
+    buildSystemPrompt(ctx) +
     effortHint +
     (skillPrompts.length ? '\n\n已启用技能规范（请严格遵循以下技能来回答与操作）：\n' + skillPrompts.join('\n\n---\n\n') : '')
   return [new SystemMessage(sysText), ...history]
@@ -216,7 +255,7 @@ async function streamSingleTurn(model, messages, res, callbacks) {
 // 无项目分支：仅注入系统提示（项目约束 + 思考强度 + 技能规范）后做纯流式补全
 export async function streamChatNoProject(model, messages, skillPrompts, effortHint, res, callbacks) {
   const sysText =
-    SYSTEM_PROMPT +
+    buildSystemPrompt({ permission: 'full', projectRoot: '' }) +
     effortHint +
     (skillPrompts.length ? '\n\n已启用技能规范：\n' + skillPrompts.join('\n\n---\n\n') : '')
   const msgs = [new SystemMessage(sysText), ...(messages || []).map(toLangchainMessage)]
