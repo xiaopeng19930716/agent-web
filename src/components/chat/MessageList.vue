@@ -226,7 +226,7 @@ onMounted(updateToBottom)
               class="bubble__content"
             >
               <div
-                v-if="m.role === 'assistant' && (m.reasoning || (m.toolCalls || []).length)"
+                v-if="m.role === 'assistant' && (m.showThinking || !m.done || m.reasoning || (m.toolCalls || []).length)"
                 class="thinking thinking--nested"
                 :class="{ 'thinking--collapsed': !thinkingExpanded.has(i) }"
               >

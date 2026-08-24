@@ -74,17 +74,16 @@ export async function truncateSession(id, keepCount) {
   if (!session) return null
   if (keepCount < 0) keepCount = 0
   if (keepCount > session.messages.length) keepCount = session.messages.length
+  // 同步截断本地消息并立即返回，保证调用方（如 regenerate）能马上 push 占位
+  // assistant 消息并渲染「思考中」，无需等待网络往返。持久化异步进行。
   session.messages = session.messages.slice(0, keepCount)
   session.updatedAt = Date.now()
-  const updated = await request(`/api/sessions/${id}`, {
+  // 异步落盘（fire-and-forget）：失败仅影响刷新后历史，不影响本次交互
+  request(`/api/sessions/${id}`, {
     method: 'PUT',
     body: JSON.stringify({ messages: session.messages }),
-  })
-  const idx = sessions.list.findIndex((s) => s.id === id)
-  if (idx >= 0) sessions.list[idx] = updated
-  else sessions.list.unshift(updated)
-  sessions.list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-  return updated
+  }).catch((e) => console.warn('truncateSession 持久化失败', e))
+  return session
 }
 
 // 归档会话：标记 archived=true，数据保留在后端，前端立即从列表中移除（不显示）

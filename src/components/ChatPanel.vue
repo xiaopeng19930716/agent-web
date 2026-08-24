@@ -273,18 +273,29 @@ async function send(payload) {
   // 清空富文本输入框（委托子组件）
   composerRef.value?.clear()
 
+  await runAssistantTurn(session, { text, pid, fileTools, skillIds, mcpServersPayload })
+}
+
+// 基于 session 中已有的上下文（最后一条为 user 消息）生成 assistant 回复。
+// 只追加 assistant 消息并流式生成，不会新增 user 消息。
+// send 与 regenerate 共用：send 先 push user 再调用；regenerate 直接调用。
+async function runAssistantTurn(session, options = {}) {
+  const { text = '', pid = active.value?.id ?? null, fileTools = [], skillIds = [], mcpServersPayload = {}, prevReasoning = '' } = options
   const assistant = reactive({
     id: newMsgId(),
     role: 'assistant',
     content: '',
-    reasoning: '',
+    // 重做时若模型未返回新推理，复用上一条 assistant 的 reasoning 作为占位，避免空思考区
+    reasoning: prevReasoning,
     reasoningDone: false,
     done: false, // 思考+生成全部完成（或出错）后才允许复制
+    showThinking: true, // 始终保留思考区（含完成态「✓ 思考完成」），避免生成后思考区消失
     toolCalls: [], // [{ name, args, status, result }]
     metadata: {},
   })
   session.messages.push(assistant)
   loading.value = true
+  let gotNewReasoning = false // 标记模型是否已返回新推理，用于清除重做占位
 
   const history = session.messages
     .filter((m) => m !== assistant)
@@ -333,6 +344,11 @@ async function send(payload) {
       }
     },
     onReasoning: (text) => {
+      // 模型返回新推理时，先清除重做占位（旧 reasoning），避免新旧拼接
+      if (!gotNewReasoning) {
+        assistant.reasoning = ''
+        gotNewReasoning = true
+      }
       assistant.reasoning += text
     },
     onToolCall: (payload) => {
@@ -373,7 +389,7 @@ async function send(payload) {
       }
       // 首条消息作为标题 + 落盘
       if (!session.title || session.title === '新对话') {
-        session.title = text.slice(0, 30) || '新对话'
+        session.title = (text || session.messages.find((m) => m.role === 'user')?.content || '').slice(0, 30) || '新对话'
       }
       await updateSession(session.id, { title: session.title, messages: session.messages })
     },
@@ -461,22 +477,45 @@ async function rollbackTo(msg) {
 }
 
 // 重新生成某条 assistant 回复：保留其前面全部上下文，删除该条及其之后，
-// 再以相同前文重新请求模型。
+// 再以相同前文重新请求模型（不再新增 user 消息，直接复用已有上下文）。
 async function regenerate(msg) {
   if (loading.value) return
   const session = sessions.list.find((s) => s.id === sessions.activeSessionId)
   if (!session) return
   const idx = session.messages.findIndex((m) => m.id === msg.id)
   if (idx < 0) return
-  // 截断到该 assistant 之前（保留前文），再触发一次发送
-  await truncateSession(session.id, idx)
-  // 复用发送流程：把"前一条 user 消息"作为本次输入重新提交。
-  // 通过 triggerSend() 让输入框自行 syncTokens() 组装 composerTokens，避免直接调 send() 缺参。
-  const prevUser = [...session.messages].reverse().find((m) => m.role === 'user')
+  // 截断前先记下被重生成 assistant 的思考内容，作为占位：
+  // 模型重新生成时若返回新 reasoning 会覆盖，若未返回则复用旧 reasoning，避免空思考区。
+  const prevReasoning = msg?.reasoning || ''
+  // 截断到该 assistant 之前（保留前文，含其前面的 user 消息）。
+  // 注意：truncateSession 内部会用后端返回的新对象替换 store 里的 session，
+  // 因此必须用其返回值作为后续操作对象，否则新 assistant 消息会 push 到旧引用上，
+  // 导致页面先空白、再直接跳到「思考完成」（看不到「思考中」）。
+  const updated = await truncateSession(session.id, idx)
+  const live = updated || sessions.list.find((s) => s.id === session.id)
+  if (!live) return
+  // 直接从已有上下文重新生成，不通过输入框、不新增 user 消息
+  const pid = live.projectId === NO_PROJECT_KEY ? null : live.projectId
+  const prevUser = [...live.messages].reverse().find((m) => m.role === 'user')
   if (!prevUser) return
-  composerRef.value?.setText(prevUser.content || '')
-  await nextTick()
-  composerRef.value?.triggerSend()
+  // 从被重生成的 user 消息 tags 还原工具/技能/MCP 配置，保证与原文一致
+  const tags = prevUser.tags || []
+  const tagSkillIds = new Set(tags.filter((t) => t.type === 'tag' && t.kind === 'skill').map((t) => t.key))
+  const tagMcpNames = new Set(tags.filter((t) => t.type === 'tag' && t.kind === 'mcp').map((t) => t.key))
+  const fileTools = baseTools.value.map((t) => t.key)
+  const skillIds = [...new Set([...tagSkillIds].filter((k) => availableSkills.value.some((s) => s.key === k)))]
+  const mcpNames = [...new Set([...tagMcpNames].filter((k) => availableMcp.value.includes(k)))]
+  const mcpServersPayload = Object.fromEntries(
+    mcpNames.map((n) => [n, (settings.mcpServers || {})[n]]).filter(([, cfg]) => cfg)
+  )
+  await runAssistantTurn(live, {
+    text: prevUser.content,
+    pid,
+    fileTools,
+    skillIds,
+    mcpServersPayload,
+    prevReasoning,
+  })
 }
 
 // 文件回退：把一次写/编辑操作前的自动备份还原回原文件
