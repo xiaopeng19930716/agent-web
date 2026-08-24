@@ -270,7 +270,8 @@ async function save() {
   // 把未删除的历史模型附回
   for (const [mid, m] of Object.entries(preserved)) nextModels[mid] = m
   vCfg.models = nextModels
-  markConfiguredVendor(newKey)
+  // 仅当填入有效 API Key 时才标记为"已配置"；只改 baseURL 或只列模型不足以认定为已配置
+  if (form.apiKey.trim()) markConfiguredVendor(newKey)
   const ok = await saveModels()
   if (!ok) {
     message.error('保存失败，请稍后重试')

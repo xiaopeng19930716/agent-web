@@ -324,7 +324,11 @@ export function buildTools(root, permission = 'full', toolKeys, mcpServers = {})
     ),
   ]
   if (!Array.isArray(toolKeys)) return all
-  return all.filter((t) => toolKeys.includes(t.name))
+  // 信息查询类工具（listSkills / listMcp）无副作用、不写文件，始终对模型可见，
+  // 即使用户没有通过「/选择工具」显式启用。这样询问"我有哪些 skills/mcp"
+  // 时模型会自动调用对应工具，而不是凭印象编造。
+  const ALWAYS_ON = new Set(['listSkills', 'listMcp'])
+  return all.filter((t) => ALWAYS_ON.has(t.name) || toolKeys.includes(t.name))
 }
 
 // 返回所有文件工具的元信息（名称 + 描述），供前端自动构建基础工具清单。

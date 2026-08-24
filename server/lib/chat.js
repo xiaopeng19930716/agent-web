@@ -51,7 +51,8 @@ export const SYSTEM_PROMPT = `你是一个资深的全栈编程助手（Code Age
 3. 完成修改后，可用 executeCommand 运行测试、构建或 lint 来验证改动是否正确（如 npm test / npm run build），并将结果反馈给用户。
 4. 用简体中文解释你的操作和思路，必要时给出完整代码片段。
 5. 涉及多种方案时先给推荐方案。
-6. 保持聚焦，避免冗余寒暄。`
+6. 保持聚焦，避免冗余寒暄。
+7. 当用户询问「有哪些 skills」「列出 MCP」「我启用了哪些能力」这类信息查询时，必须调用 listSkills / listMcp 工具获取真实数据再回答，禁止凭印象编造代码或函数名。`
 
 export function buildChatModel(cfg, callbacks) {
   const modelKey = cfg.model || DEFAULT_MODEL

@@ -97,7 +97,14 @@ function buildModels(parsed) {
   if (merged.activeModel) {
     const [vk, mid] = merged.activeModel.split('/')
     if (!merged.vendors[vk] || !merged.vendors[vk].models || !merged.vendors[vk].models[mid]) {
-      merged.activeModel = ''
+      // 容错：旧数据可能只存了纯 modelId（缺 vendorKey 前缀），尝试按 modelId 反查补全
+      if (!vk && mid) {
+        const found = Object.keys(merged.vendors).find(
+          (key) => merged.vendors[key].models && merged.vendors[key].models[mid]
+        )
+        if (found) merged.activeModel = `${found}/${mid}`
+      }
+      if (!/^[^/]+\/[^/]+$/.test(merged.activeModel)) merged.activeModel = ''
     }
   }
   if (!merged.activeModel) {
@@ -199,6 +206,11 @@ async function initModels() {
     const validKeys = new Set(Object.keys(settings.vendors))
     settings.configuredVendors = settings.configuredVendors.filter((k) => validKeys.has(k))
     settings.disabledVendors = settings.disabledVendors.filter((k) => validKeys.has(k))
+    // 仅"已配置"应代表用户填过有效 API Key；API Key 为空（默认壳）的供应商不应被标为已配置
+    settings.configuredVendors = settings.configuredVendors.filter((k) => {
+      const v = settings.vendors[k]
+      return v && v.options && v.options.apiKey && v.options.apiKey.trim()
+    })
   } catch (e) {
     console.error('加载模型配置失败，使用默认值:', e)
   }
@@ -311,6 +323,11 @@ export async function resetSettings() {
     mcpServers: {},
     disabledMcpServers: [],
     enabledSkills: [],
+  })
+  // 双保险：剔除仍在 configuredVendors 里但 API Key 为空的供应商（默认壳不应算"已配置"）
+  settings.configuredVendors = settings.configuredVendors.filter((k) => {
+    const v = settings.vendors[k]
+    return v && v.options && v.options.apiKey && v.options.apiKey.trim()
   })
   await saveSettings()
 }
