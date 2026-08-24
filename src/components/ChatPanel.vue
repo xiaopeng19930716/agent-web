@@ -8,13 +8,20 @@ import {
   setActiveProject,
   fetchProjects,
 } from '../projects.js'
+import { restoreFile, restoreBatch } from '../api/restore.js'
 import {
   sessions,
   NO_PROJECT_KEY,
   fetchSessions,
   createSession,
   updateSession,
+  truncateSession,
 } from '../sessions.js'
+
+// 生成稳定消息 id（用于 :key 与回退定位，避免数组下标复用导致的渲染错乱）
+function newMsgId() {
+  return 'm_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+}
 import { settings, flattenVendors } from '../settings.js'
 import { fetchSkills, fetchFileTools } from '../api/agent.js'
 import { onBus, emitBus } from '../bus.js'
@@ -230,9 +237,10 @@ async function send(payload) {
   let text = bodyParts.join(' ').replace(/\s+/g, ' ').trim()
   if (!text || loading.value) return
 
-  // 与旧式 sessionToolCmds/selectedSkills/selectedMcp 合并（保留兼容）
+  // 文件工具始终全部启用（B 方案）：listFiles/readFile/writeFile/editFile/searchInProject/executeCommand
+  // 等核心能力默认即可用，无需用户逐个勾选；MCP/Skills 仍是可选扩展。
   const cmdSet = new Set([...sessionToolCmds, ...tagToolKeys])
-  const fileTools = baseTools.value.map((t) => t.key).filter((k) => cmdSet.has(k))
+  const fileTools = baseTools.value.map((t) => t.key)
   const skillIds = [...new Set([...selectedSkills, ...tagSkillIds].filter((k) =>
     availableSkills.value.some((s) => s.key === k)))]
   const mcpNames = [...new Set([...selectedMcp, ...tagMcpNames].filter((k) =>
@@ -261,11 +269,12 @@ async function send(payload) {
     type: t.type,
     ...(t.type === 'tag' ? { kind: t.kind, key: t.key, label: t.label || t.key } : { text: t.text }),
   }))
-  session.messages.push({ role: 'user', content: text, tags, metadata: { timestamp: Date.now() } })
+  session.messages.push({ id: newMsgId(), role: 'user', content: text, tags, metadata: { timestamp: Date.now() } })
   // 清空富文本输入框（委托子组件）
   composerRef.value?.clear()
 
   const assistant = reactive({
+    id: newMsgId(),
     role: 'assistant',
     content: '',
     reasoning: '',
@@ -384,6 +393,103 @@ async function send(payload) {
   })
 }
 
+// ── 对话级回退 ───────────────────────────────────────────────
+// 从工具结果字符串里解析 { filePath, backupId }
+// writeFile/editFile 结果形如：
+//   "已写入: a.txt | backupId=.agent-backup/a.txt.2026-..."  （覆盖/编辑，可还原）
+//   "已写入: a.txt | backupId= | created=1"                  （新建，回退时需删除）
+function parseFileOp(result, name) {
+  if (name !== 'writeFile' && name !== 'editFile') return null
+  if (typeof result !== 'string') return null
+  const m = result.match(/backupId=(.*?)(?:\s*$)/)
+  const backupId = m ? m[1].trim() : ''
+  const fm = result.match(/:\s*(.+?)\s*\|/)
+  const filePath = fm ? fm[1].trim() : ''
+  if (!filePath) return null
+  return { filePath, backupId }
+}
+
+// 回退到某条 user 消息之前：删除该 user 消息及其之后所有内容，
+// 并同步把这段对话中 Agent 改动/新建的文件一并回退到该消息之前的状态。
+async function rollbackTo(msg) {
+  if (loading.value) return
+  const session = sessions.list.find((s) => s.id === sessions.activeSessionId)
+  if (!session) return
+  const idx = session.messages.findIndex((m) => m.id === msg.id)
+  if (idx < 0) return
+  const ok = window.confirm('回退到此处？\n\n这条消息及其之后的所有内容，以及期间被改动/新建的文件都将被撤销。')
+  if (!ok) return
+
+  // 截断前，先收集被删消息里所有写/编辑操作的文件信息
+  const removed = session.messages.slice(idx)
+  const ops = []
+  for (const m of removed) {
+    if (m.role !== 'assistant') continue
+    for (const t of (m.toolCalls || [])) {
+      const op = parseFileOp(t.result, t.name)
+      if (op) ops.push(op)
+    }
+  }
+
+  // 截断到该 user 消息之前（不包含它），对话中该消息消失
+  await truncateSession(session.id, idx)
+
+  // 文件回退：有备份则还原，新建文件则删除
+  if (ops.length) {
+    const projectId = activeProjectId.id || ''
+    try {
+      const r = await restoreBatch(projectId, ops)
+      if (!r.ok) error.value = r.error || '文件回退失败'
+      else if (r.results && r.results.length) {
+        const done = r.results.map((x) => (x.action === 'deleted' ? `删除 ${x.filePath}` : `还原 ${x.filePath}`)).join('；')
+        // 轻量提示已回退的文件（不阻塞对话）
+        console.info('已回退文件：' + done)
+      }
+    } catch (e) {
+      error.value = '文件回退失败: ' + (e.message || String(e))
+    }
+  }
+
+  // 输入框自动填入原文，便于修改后重发
+  composerRef.value?.setText(msg.content || '')
+  composerRef.value?.focusComposer()
+}
+
+// 重新生成某条 assistant 回复：保留其前面全部上下文，删除该条及其之后，
+// 再以相同前文重新请求模型。
+async function regenerate(msg) {
+  if (loading.value) return
+  const session = sessions.list.find((s) => s.id === sessions.activeSessionId)
+  if (!session) return
+  const idx = session.messages.findIndex((m) => m.id === msg.id)
+  if (idx < 0) return
+  // 截断到该 assistant 之前（保留前文），再触发一次发送
+  await truncateSession(session.id, idx)
+  // 复用发送流程：把"前一条 user 消息"作为本次输入重新提交
+  const prevUser = [...session.messages].reverse().find((m) => m.role === 'user')
+  if (!prevUser) return
+  composerRef.value?.setText(prevUser.content || '')
+  composerRef.value?.focusComposer()
+  await send()
+}
+
+// 文件回退：把一次写/编辑操作前的自动备份还原回原文件
+async function restoreFileHandler(payload) {
+  if (loading.value) return
+  const projectId = payload.projectId || activeProjectId.id || ''
+  try {
+    const r = await restoreFile(projectId, payload.backupPath)
+    if (r.ok) {
+      error.value = ''
+      alert('已还原文件：' + r.restored)
+    } else {
+      error.value = r.error || '还原失败'
+    }
+  } catch (e) {
+    error.value = '还原失败: ' + (e.message || String(e))
+  }
+}
+
 // 切换项目
 async function init() {
   // 左侧对话框仅加载未归档会话（archived=0）
@@ -401,7 +507,7 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
   <div class="chat">
     <ChatHeader :active-session="activeSession" @open-log="showLog = true" />
 
-    <MessageList :messages="currentMessages" :active="active" :error="error" />
+    <MessageList :messages="currentMessages" :active="active" :error="error" :project-id="activeProjectId.id || ''" @rollback="rollbackTo" @regenerate="regenerate" @restore="restoreFileHandler" />
 
     <ComposerInput
       ref="composerRef"

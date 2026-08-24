@@ -47,11 +47,59 @@ export function safeResolve(root, rel) {
   return target
 }
 
+// 文件回退：写/编辑前先备份原文件到 项目根/.agent-backup/<相对路径>.<时间戳>
+// backupPath（相对项目根，含 .agent-backup 前缀）作为还原凭证回传前端。
+// 仅当原文件已存在时才备份（新建文件无需备份）；备份目录同样受 safeResolve 约束。
+const BACKUP_DIR = '.agent-backup'
+export function backupBeforeWrite(root, filePath) {
+  const full = safeResolve(root, filePath)
+  if (!fs.existsSync(full)) return null // 新文件，无原内容可备份
+  const ts = new Date().toISOString().replace(/[:.]/g, '-')
+  const safeRel = String(filePath).replace(/\\/g, '/').replace(/^\/+/, '')
+  const backupRel = `${BACKUP_DIR}/${safeRel}.${ts}`
+  const backupFull = safeResolve(root, backupRel)
+  try {
+    fs.mkdirSync(path.dirname(backupFull), { recursive: true })
+    fs.copyFileSync(full, backupFull)
+    return backupRel
+  } catch {
+    return null
+  }
+}
+
+// 还原备份：backupPath 必须是 .agent-backup/<...> 格式（防止越界/任意路径读取）
+export function restoreBackup(root, backupPath) {
+  if (!backupPath || typeof backupPath !== 'string') throw new Error('缺少 backupPath')
+  const normalized = backupPath.replace(/\\/g, '/').replace(/^\/+/, '')
+  if (!normalized.startsWith(BACKUP_DIR + '/')) {
+    throw new Error('非法备份路径: ' + backupPath)
+  }
+  const backupFull = safeResolve(root, normalized)
+  if (!fs.existsSync(backupFull)) throw new Error('备份不存在或已清理: ' + backupPath)
+  // 还原目标 = 去掉 .agent-backup/ 前缀和时间戳后缀
+  const rest = normalized.slice(BACKUP_DIR.length + 1) // <safeRel>.<ts>
+  const dot = rest.lastIndexOf('.')
+  if (dot <= 0) throw new Error('备份文件名格式异常: ' + backupPath)
+  const originalRel = rest.slice(0, dot)
+  const originalFull = safeResolve(root, originalRel)
+  fs.mkdirSync(path.dirname(originalFull), { recursive: true })
+  fs.copyFileSync(backupFull, originalFull)
+  return originalRel
+}
+
+// 删除文件（回退"新建文件"操作使用）：受 safeResolve 边界约束，仅删项目内文件
+export function deleteFileSafe(root, filePath) {
+  const full = safeResolve(root, filePath)
+  if (!fs.existsSync(full)) return filePath // 已不存在，视为成功
+  fs.rmSync(full, { force: true })
+  return filePath
+}
+
 export function tree(root, dir, depth, out) {
   if (depth > 4) return
   const entries = fs.readdirSync(dir, { withFileTypes: true })
   for (const e of entries) {
-    if (e.name === 'node_modules' || e.name === '.git' || e.name.startsWith('.')) continue
+    if (e.name === 'node_modules' || e.name === '.git' || e.name === BACKUP_DIR || e.name.startsWith('.')) continue
     const full = path.join(dir, e.name)
     const rel = path.relative(root, full)
     if (e.isDirectory()) {
@@ -69,7 +117,7 @@ export function grep(root, pattern, dir, results, depth) {
   const entries = fs.readdirSync(dir, { withFileTypes: true })
   const re = new RegExp(pattern, 'i')
   for (const e of entries) {
-    if (e.name === 'node_modules' || e.name === '.git' || e.name.startsWith('.')) continue
+    if (e.name === 'node_modules' || e.name === '.git' || e.name === BACKUP_DIR || e.name.startsWith('.')) continue
     const full = path.join(dir, e.name)
     const rel = path.relative(root, full)
     if (e.isDirectory()) {
@@ -103,7 +151,7 @@ export function listDirectory(root, rel = '') {
   const entries = fs.readdirSync(dir, { withFileTypes: true })
   const items = []
   for (const e of entries) {
-    if (e.name === 'node_modules' || e.name === '.git' || e.name.startsWith('.')) continue
+    if (e.name === 'node_modules' || e.name === '.git' || e.name === BACKUP_DIR || e.name.startsWith('.')) continue
     const relPath = rel ? path.join(rel, e.name).replace(/\\/g, '/') : e.name
     items.push({
       name: e.name,
@@ -195,8 +243,14 @@ export function buildTools(root, permission = 'full', toolKeys, mcpServers = {})
       async ({ filePath, content }) => {
         const full = safeResolve(root, filePath)
         return writeGuard(async () => {
+          const existed = fs.existsSync(full)
+          const backupId = backupBeforeWrite(root, filePath)
           await fsp.writeFile(full, content, 'utf-8')
-          return '已写入: ' + filePath
+          // 回退联动：新建文件(原不存在)标记 created=1，回退时用于删除而非还原
+          const tag = backupId
+            ? ` | backupId=${backupId}`
+            : ` | backupId= | created=1`
+          return '已写入: ' + filePath + tag
         })
       },
       {
@@ -219,8 +273,9 @@ export function buildTools(root, permission = 'full', toolKeys, mcpServers = {})
           const text = await fsp.readFile(full, 'utf-8')
           if (!text.includes(oldStr)) return '错误：未在文件中找到 oldStr。'
           const updated = text.replace(oldStr, newStr)
+          const backupId = backupBeforeWrite(root, filePath)
           await fsp.writeFile(full, updated, 'utf-8')
-          return '已修改: ' + filePath
+          return '已修改: ' + filePath + (backupId ? ` | backupId=${backupId}` : '')
         })
       },
       {

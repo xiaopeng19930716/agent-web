@@ -3,7 +3,7 @@ import { ref, reactive, computed, nextTick, watch, onMounted } from 'vue'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
-import { ChevronDown, ChevronUp, Check, Loader2, Copy, ArrowDown } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Check, Loader2, Copy, ArrowDown, Undo2, Redo2 } from 'lucide-vue-next'
 
 marked.setOptions({
   highlight(code, lang) {
@@ -18,7 +18,40 @@ const props = defineProps({
   messages: { type: Array, default: () => [] },
   active: { type: Object, default: null },
   error: { type: String, default: '' },
+  projectId: { type: String, default: '' },
 })
+
+const emit = defineEmits(['rollback', 'regenerate', 'restore'])
+
+// 对话级回退：删除该消息及其之后 / 重新生成
+function onEdit(m) {
+  emit('rollback', m)
+}
+
+// 文件回退：从工具结果里解析出 backupId（写/编辑工具会在结果中附带 | backupId=...）
+function extractBackupId(result) {
+  if (typeof result !== 'string') return null
+  const m = result.match(/backupId=(.+?)(?:\s*$)/)
+  return m ? m[1].trim() : null
+}
+
+// 仅写/编辑类工具且成功备份后才提供「还原」入口
+function canRestore(t) {
+  return (
+    t.status === 'done' &&
+    (t.name === 'writeFile' || t.name === 'editFile') &&
+    extractBackupId(t.result) !== null
+  )
+}
+
+function onRestore(t) {
+  const backupId = extractBackupId(t.result)
+  if (!backupId) return
+  emit('restore', { projectId: props.projectId, backupPath: backupId })
+}
+function onRegenerate(m) {
+  emit('regenerate', m)
+}
 
 const scrollEl = ref(null)
 
@@ -148,7 +181,7 @@ onMounted(updateToBottom)
 
       <div
         v-for="(m, i) in messages"
-        :key="i"
+        :key="m.id || i"
         class="msg"
         :class="m.role === 'user' ? 'msg--user' : 'msg--ai'"
       >
@@ -170,6 +203,19 @@ onMounted(updateToBottom)
               </template>
             </template>
             <template v-else>{{ m.content }}</template>
+
+            <!-- 用户消息：回退图标，置于气泡内部底部 -->
+            <div class="bubble__footer bubble__footer--user">
+              <button
+                class="bubble__iconbtn"
+                type="button"
+                title="回退到此处：删除此消息及其之后内容，并将原文填入输入框"
+                aria-label="回退到此处"
+                @click="onEdit(m)"
+              >
+                <Undo2 :size="14" />
+              </button>
+            </div>
           </div>
           <div
             v-else
@@ -232,6 +278,18 @@ onMounted(updateToBottom)
                           </span>
                           <pre v-show="resultExpanded.has(resultKey(i, ti))" class="timeline__result-body">{{ clip(t.result, 1200) }}</pre>
                         </div>
+                        <div v-if="canRestore(t)" class="timeline__restore">
+                          <button
+                            class="bubble__iconbtn"
+                            type="button"
+                            title="还原此文件改动（恢复到被修改前的备份）"
+                            aria-label="还原文件"
+                            @click="onRestore(t)"
+                          >
+                            <Undo2 :size="14" />
+                            <span>还原</span>
+                          </button>
+                        </div>
                       </div>
                     </li>
                   </ul>
@@ -240,19 +298,30 @@ onMounted(updateToBottom)
 
               <div class="bubble__markdown" v-html="renderMarkdown(m.content)"></div>
 
-              <button
-                class="bubble__copy bubble__copy--bottom"
-                :class="{ 'bubble__copy--done': copiedSet.has(i) }"
-                type="button"
-                :disabled="m.done === false"
-                :aria-label="copiedSet.has(i) ? '已复制' : '复制内容'"
-                :title="m.done === false ? '思考/生成中，完成后可复制' : (copiedSet.has(i) ? '已复制' : '复制')"
-                @click="m.done !== false && copyContent(i, m.content)"
-              >
-                <Check v-if="copiedSet.has(i)" :size="13" />
-                <Copy v-else :size="13" />
-                <span class="bubble__copy-text">{{ copiedSet.has(i) ? '已复制' : '复制' }}</span>
-              </button>
+              <!-- Agent 回答操作条：复制 + 重做（重新生成）并排 -->
+              <div class="bubble__footer bubble__footer--ai">
+                <button
+                  class="bubble__iconbtn"
+                  type="button"
+                  :disabled="m.done === false"
+                  :aria-label="copiedSet.has(i) ? '已复制' : '复制内容'"
+                  :title="m.done === false ? '思考/生成中，完成后可复制' : (copiedSet.has(i) ? '已复制' : '复制')"
+                  @click="m.done !== false && copyContent(i, m.content)"
+                >
+                  <Check v-if="copiedSet.has(i)" :size="14" />
+                  <Copy v-else :size="14" />
+                </button>
+                <button
+                  class="bubble__iconbtn"
+                  type="button"
+                  :disabled="m.done === false"
+                  title="重新生成此回答"
+                  aria-label="重新生成"
+                  @click="m.done !== false && onRegenerate(m)"
+                >
+                  <Redo2 :size="14" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -348,6 +417,7 @@ onMounted(updateToBottom)
   word-break: break-all;
 }
 .msg {
+  position: relative;
   margin-bottom: 18px;
   max-width: 88%;
   display: flex;
@@ -357,7 +427,6 @@ onMounted(updateToBottom)
   margin-left: auto;
   align-items: flex-end;
 }
-
 // ===== 气泡 =====
 .bubble {
   display: flex;
@@ -399,68 +468,53 @@ onMounted(updateToBottom)
   min-width: 0;
   max-width: 100%;
 }
-.bubble__copy {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border: 1px solid @color-border;
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.9);
-  color: @color-text-muted;
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0;
-  transform: translateY(-2px);
-  transition: opacity 0.15s ease, transform 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-.bubble__body:hover .bubble__copy,
-.bubble__copy:focus-visible {
-  opacity: 1;
-  transform: translateY(0);
-}
-.bubble__copy:hover {
-  color: @color-primary;
-  border-color: @color-primary;
-}
-.bubble__copy:active {
-  transform: scale(0.96);
-}
-.bubble__copy--done,
-.bubble__copy--done:hover {
-  color: #16a34a;
-  border-color: #16a34a;
-  opacity: 1;
-}
 .bubble__copy-text {
   font-weight: 500;
 }
-/* 底部复制按钮：嵌入对话框底部，右对齐一行 */
-.bubble__copy--bottom {
-  position: static;
-  opacity: 1;
-  transform: none;
-  margin-top: 10px;
-  margin-left: auto;
-  width: fit-content;
-  background: transparent;
-  border-color: transparent;
-  color: @color-text-muted;
+/* 消息操作条：位于气泡底部，图标按钮横排 */
+.bubble__footer {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
 }
-.bubble__copy--bottom:hover {
+.bubble__footer--user {
+  justify-content: flex-end;
+}
+.bubble__footer--ai {
+  justify-content: flex-end;
+}
+.bubble__iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid @color-border;
+  background: transparent;
+  color: @color-text-muted;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.bubble__iconbtn:hover:not(:disabled) {
   background: #f1f5f9;
   border-color: @color-border;
-  transform: none;
+  color: @color-text;
 }
-.bubble__copy:disabled {
+.bubble__iconbtn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-  color: @color-text-muted;
   pointer-events: none;
+}
+/* 用户蓝色气泡内的图标按钮：使用半透明浅色，避免深色边框突兀 */
+.bubble--user .bubble__iconbtn {
+  border-color: rgba(255, 255, 255, 0.25);
+  color: rgba(255, 255, 255, 0.8);
+}
+.bubble--user .bubble__iconbtn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #fff;
 }
 .bubble--user .bubble__text {
   background: linear-gradient(135deg, @color-primary, @color-primary-hover);
@@ -743,6 +797,19 @@ onMounted(updateToBottom)
   overflow: auto;
   white-space: pre-wrap;
   font-family: 'Fira Code', Consolas, monospace;
+}
+/* 文件回退：写/编辑工具结果下的「还原」入口 */
+.timeline__restore {
+  margin-top: 6px;
+}
+.timeline__restore .bubble__iconbtn {
+  border-color: @color-border;
+  color: @color-text-muted;
+}
+.timeline__restore .bubble__iconbtn:hover:not(:disabled) {
+  background: rgba(91, 140, 255, 0.12);
+  border-color: @color-primary;
+  color: @color-primary;
 }
 
 .chat__error {

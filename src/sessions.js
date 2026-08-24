@@ -24,6 +24,15 @@ async function request(url, options) {
 export async function fetchSessions(archived) {
   const qs = archived === undefined || archived === '' ? '' : `?archived=${archived}`
   const list = await request('/api/sessions' + qs)
+  // 给历史消息补稳定 id：旧会话（加 id 之前）的消息没有 id 字段，
+  // 若不补，回退时 undefined===undefined 会误匹配到第一条，导致截断到 idx=0 清空前文。
+  for (const s of list) {
+    if (Array.isArray(s.messages)) {
+      s.messages.forEach((m, i) => {
+        if (!m.id) m.id = 'm_legacy_' + s.id + '_' + i
+      })
+    }
+  }
   sessions.list = list
   return list
 }
@@ -54,6 +63,28 @@ export async function deleteSession(id) {
   await request(`/api/sessions/${id}`, { method: 'DELETE' })
   sessions.list = sessions.list.filter((s) => s.id !== id)
   if (sessions.activeSessionId === id) sessions.activeSessionId = null
+}
+
+// 回退（对话级）：删除从 keepCount 开始（含）之后的所有消息，保留前 keepCount 条。
+// 用于「编辑某条 user 消息并重发」或「重新生成某条 assistant 回复」——
+// 即把该消息及其后续全部截断，回到该轮之前的状态，再重新请求模型。
+// 截断后调用后端 PUT 落盘，保证刷新后历史一致。
+export async function truncateSession(id, keepCount) {
+  const session = sessions.list.find((s) => s.id === id)
+  if (!session) return null
+  if (keepCount < 0) keepCount = 0
+  if (keepCount > session.messages.length) keepCount = session.messages.length
+  session.messages = session.messages.slice(0, keepCount)
+  session.updatedAt = Date.now()
+  const updated = await request(`/api/sessions/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ messages: session.messages }),
+  })
+  const idx = sessions.list.findIndex((s) => s.id === id)
+  if (idx >= 0) sessions.list[idx] = updated
+  else sessions.list.unshift(updated)
+  sessions.list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+  return updated
 }
 
 // 归档会话：标记 archived=true，数据保留在后端，前端立即从列表中移除（不显示）

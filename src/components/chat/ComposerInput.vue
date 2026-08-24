@@ -298,7 +298,12 @@ function clear() {
   if (composerEl.value) composerEl.value.textContent = "";
 }
 
-defineExpose({ clear, focusComposer });
+// 供父级在「编辑并重发」时回填用户消息正文
+function setText(text) {
+  if (composerEl.value) composerEl.value.textContent = text || ''
+}
+
+defineExpose({ clear, focusComposer, setText });
 </script>
 
 <template>
