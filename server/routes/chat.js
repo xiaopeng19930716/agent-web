@@ -1,3 +1,4 @@
+import os from 'os'
 import { Router } from 'express'
 import { projects } from '../lib/store.js'
 import { DEFAULT_MODEL } from '../lib/config.js'
@@ -93,8 +94,6 @@ router.post('/chat', async (req, res) => {
   let perm = 'full'
   if (permission === 'read-only' || permission === 'none') perm = permission
   else if (permission === 'ask') perm = 'ask'
-  // 无项目时文件/命令工具不可用，ask 无意义，降级为 none（与前端 A2 下拉收敛一致）
-  const effectivePerm = projectRoot ? perm : 'none'
   // 思考链（reasoning）：高思考强度或 qwen-thinking 系列模型时开启
   const enableThinking = effort === 'high' || /thinking/i.test(model)
   // 思考强度（effort）映射到系统提示片段
@@ -103,6 +102,10 @@ router.post('/chat', async (req, res) => {
   // 校验关联项目，返回后端已知的项目根目录（失败则已写响应并返回 null）
   const projectRoot = resolveProjectRoot(projectId, res)
   if (projectRoot === null && projectId) return
+  // 权限保持用户选择（read-only / full / ask / none 均生效）：
+  // 无项目时文件工具以「服务端工作目录」为安全边界（见下方 fileRoot），
+  // 因此读文件默认可用；写文件/命令仍受 perm 约束。
+  const effectivePerm = perm
 
   setupSSE(res)
   const startTime = Date.now()
@@ -110,9 +113,10 @@ router.post('/chat', async (req, res) => {
   const callbacks = [new TokenStatsHandler(usageRef)]
   const writeMeta = createMetaWriter(res, model, usageRef, startTime)
 
-  // 「需确认」模式 + 有项目：建立确认闸门；客户端断开时拒绝所有 pending，避免挂死
+  // 「需确认」模式：建立确认闸门；客户端断开时拒绝所有 pending，避免挂死
+  // （不依赖项目：无项目时文件工具以服务端工作目录为边界，确认闸门同样适用）
   let confirmGate = null
-  if (perm === 'ask' && projectRoot) {
+  if (perm === 'ask') {
     confirmGate = new ConfirmGate(sessionId, res)
     if (sessionId) gatesBySession.set(sessionId, confirmGate)
   }
@@ -141,8 +145,11 @@ router.post('/chat', async (req, res) => {
     // MCP 工具：按请求传入的 mcpServers 配置加载（未启用/异常时为空数组，不影响对话）
     const mcpTools = await loadMcpTools(mcpServers)
 
+    // 文件工具边界 root：有项目用项目根；无项目用用户主目录（os.homedir()），
+    // 这样无项目对话也能读取/查询桌面、文档、下载等主目录下的文件，且仍受 safeResolve 边界保护。
+    const fileRoot = projectRoot || os.homedir()
     // 有项目：文件工具受项目根目录安全边界约束，按权限提供；
-    // 无项目：文件/命令工具依赖项目边界不可用，但 MCP 工具与技能规范仍走 Agent 循环（MCP 不依赖项目根目录）。
+    // 无项目：文件工具以用户主目录为边界，读文件默认可用（写/命令仍受 perm 约束）；
     // 两种场景统一复用 runAgent，仅 root/perm/enabledTools 三处参数不同。
     await runAgent(
       chatModel,
@@ -152,12 +159,13 @@ router.post('/chat', async (req, res) => {
       effectivePerm,
       callbacks,
       {
+        fileRoot,
         enabledTools: Array.isArray(tools) ? tools : [],
         skillPrompts,
         mcpTools,
         mcpServers,
         effortHint,
-        confirmGate: perm === 'ask' && projectRoot ? confirmGate : null,
+        confirmGate: perm === 'ask' ? confirmGate : null,
         abortSignal: abortController ? abortController.signal : null,
       }
     )

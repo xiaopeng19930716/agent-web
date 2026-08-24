@@ -1,3 +1,4 @@
+import os from 'os'
 import { ChatOpenAI } from '@langchain/openai'
 import {
   HumanMessage,
@@ -91,9 +92,9 @@ function buildPermissionSection(permission) {
 function buildProjectSection(projectRoot) {
   if (!projectRoot) {
     return (
-      '\n\n当前没有关联项目（通用对话模式）。你仍可回答编程问题、给出示例与建议，但不应假设存在某个本地项目文件。' +
-      '本地文件读写、编辑与命令执行工具在此模式下不可用。若用户要求你创建、读取、修改文件或运行命令，' +
-      '请明确告知「当前为通用对话模式，未关联项目，无法操作本地文件」，并引导用户先在界面顶部关联（或新建）一个项目后再试。'
+      '\n\n当前没有关联项目（通用对话模式）。你仍可回答编程问题、给出示例与建议；' +
+      '同时你可以读取/查询用户主目录下的文件（listFiles、readFile、searchInProject 等），' +
+      '覆盖桌面、文档、下载等常见位置，路径相对于用户主目录。若用户要求修改文件或运行命令，请遵循当前权限模式（只读/完全访问）的约束。'
     )
   }
   return '\n\n当前已关联一个本地项目，涉及文件操作时以其为根。'
@@ -139,6 +140,7 @@ export function buildChatModel(cfg, callbacks) {
 // 全程流式输出到 res（reasoning 增量 + 正文增量 + 工具调用结构化事件）
 export async function runAgent(model, history, projectRoot, res, permission = 'full', callbacks, opts = {}) {
   const {
+    fileRoot,
     enabledTools,
     skillPrompts = [],
     mcpTools = [],
@@ -147,7 +149,10 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
     confirmGate = null, // 「需确认(ask)」模式下的确认闸门；非 ask 时为 null
     abortSignal = null, // 停止生成信号；收到 abort 后尽快中断循环与工具调用
   } = opts
-  const { modelWithTools, toolMap } = buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools, mcpServers)
+  // 文件工具边界：有项目用项目根；无项目用用户主目录（fileRoot 由路由层给定），
+  // 这样无项目对话也能读取/查询桌面、文档等主目录下的文件，同时 safeResolve 仍约束不能越界。
+  const toolRoot = fileRoot || projectRoot || os.homedir()
+  const { modelWithTools, toolMap } = buildModelWithTools(model, toolRoot, permission, enabledTools, mcpTools, mcpServers)
   const messages = buildSystemMessages(history, skillPrompts, effortHint, { permission, projectRoot })
 
   const MAX_TURNS = 12

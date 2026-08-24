@@ -32,16 +32,26 @@ const effort = computed({
   set: (v) => (settings.effort = v),
 });
 const permission = computed({
-  get: () => settings.permission || "full",
+  get: () => {
+    const p = settings.permission || "full";
+    // 无项目时下拉只提供 read-only / full（见 permissionOptions），
+    // 若当前值为 ask / none（有项目时设置的），归一化为 read-only，避免下拉显示空白。
+    if (!activeProjectId.id && !["read-only", "full"].includes(p)) return "read-only";
+    return p;
+  },
   set: (v) => (settings.permission = v),
 });
 
-// 是否关联了项目：无项目时本地文件/命令工具不可用，权限无意义，下拉收敛为一项灰显“沙箱”
+// 权限下拉选项：
+// - 有项目：完全访问 / 需确认 / 只读 / 不允许
+// - 无项目：本地文件工具以「用户主目录」为边界（可读桌面/文档/下载等），
+//   因此提供「只读 / 完全访问」两项，让用户控制是否允许写入/执行命令。
 // 注：projects.js 中 activeProjectId 是 reactive({ id }),不是 ref,因此读 .id(不要 .value)
 const permissionOptions = computed(() => {
   if (!activeProjectId.id) {
     return [
-      { value: "none", label: "沙箱(无项目)", disabled: true },
+      { value: "read-only", label: "只读" },
+      { value: "full", label: "完全访问" },
     ];
   }
   return [
@@ -354,7 +364,7 @@ defineExpose({ clear, focusComposer });
             </button>
           </div>
           <div class="chat__controls">
-            <div v-if="activeProjectId.id" class="chat__control" title="权限">
+            <div class="chat__control" title="权限">
               <Shield :size="14" class="chat__control-icon" />
               <a-select
                 v-model:value="permission"
