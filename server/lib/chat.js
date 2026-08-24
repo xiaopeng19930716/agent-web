@@ -145,6 +145,7 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
     mcpServers = {},
     effortHint = '',
     confirmGate = null, // 「需确认(ask)」模式下的确认闸门；非 ask 时为 null
+    abortSignal = null, // 停止生成信号；收到 abort 后尽快中断循环与工具调用
   } = opts
   const { modelWithTools, toolMap } = buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools, mcpServers)
   const messages = buildSystemMessages(history, skillPrompts, effortHint, { permission, projectRoot })
@@ -153,8 +154,11 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
 
   // 多轮循环：每轮让模型基于完整上下文生成一次回复
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    // 用户主动停止 → 立即中断整个 Agent 循环
+    if (abortSignal?.aborted) break
+
     // 流式消费本轮模型输出，得到正文与（归一化后的）工具调用列表
-    const { aiContent, toolCalls } = await streamModelTurn(modelWithTools, messages, res, callbacks)
+    const { aiContent, toolCalls } = await streamModelTurn(modelWithTools, messages, res, callbacks, abortSignal)
 
     // 把模型本轮回复加入上下文
     messages.push(new AIMessage({ content: aiContent, tool_calls: toolCalls }))
@@ -164,9 +168,12 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
 
     // 逐个执行工具，并将结果回灌为 ToolMessage，供下一轮模型参考
     for (const call of toolCalls) {
-      const result = await executeToolCall(call, toolMap, res, { permission, confirmGate })
+      // 工具执行前再次检查停止信号
+      if (abortSignal?.aborted) break
+      const result = await executeToolCall(call, toolMap, res, { permission, confirmGate, abortSignal })
       messages.push(new ToolMessage({ content: result, tool_call_id: call.id }))
     }
+    if (abortSignal?.aborted) break
   }
 }
 
@@ -190,11 +197,16 @@ function buildSystemMessages(history, skillPrompts, effortHint = '', ctx = {}) {
 
 // 流式消费模型一轮输出：增量转发 reasoning/正文，并拼接工具调用分片
 // 返回 { aiContent, toolCalls }（toolCalls 已解析 args JSON）
-async function streamModelTurn(modelWithTools, messages, res, callbacks) {
+// abortSignal：传给 langchain 的 stream，收到中止时底层会抛 AbortError 立即结束本轮
+async function streamModelTurn(modelWithTools, messages, res, callbacks, abortSignal = null) {
   let aiContent = ''
   const callBuffers = {} // 工具调用索引 -> { name, args, id }（流式分片需拼接）
 
-  const stream = await modelWithTools.stream(messages, callbacks ? { callbacks } : undefined)
+  const stream = await modelWithTools.stream(
+    messages,
+    callbacks ? { callbacks, signal: abortSignal || undefined }
+             : (abortSignal ? { signal: abortSignal } : undefined)
+  )
   for await (const chunk of stream) {
     // 思考链（reasoning）增量
     const reasoning = chunk.additional_kwargs?.reasoning_content
@@ -227,9 +239,17 @@ async function streamModelTurn(modelWithTools, messages, res, callbacks) {
 
 // 执行单个工具调用：发出 start/end 结构化事件并返回结果字符串
 // options.confirmGate：ask 模式下的确认闸门（非 ask 模式不传，直接执行）
+// options.abortSignal：停止生成信号；执行前/执行中中止则中断
 async function executeToolCall(call, toolMap, res, options = {}) {
-  const { permission = 'full', confirmGate = null } = options
+  const { permission = 'full', confirmGate = null, abortSignal = null } = options
   const tool = toolMap[call.name]
+
+  // 执行前检查停止
+  if (abortSignal?.aborted) {
+    const msg = '已停止生成（用户中断）。'
+    res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'canceled', result: msg })}\n\n`)
+    return msg
+  }
 
   res.write(`data: ${JSON.stringify({ type: 'tool_call', name: call.name, args: call.args, status: 'start' })}\n\n`)
 
@@ -248,6 +268,12 @@ async function executeToolCall(call, toolMap, res, options = {}) {
       const denied = '用户拒绝了该工具调用（' + call.name + '）。请向用户说明，并改用其他安全方案或停止该操作。'
       res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'denied', result: denied })}\n\n`)
       return denied
+    }
+    // 确认等待过程中用户可能又点了停止
+    if (abortSignal?.aborted) {
+      const msg = '已停止生成（用户中断）。'
+      res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'canceled', result: msg })}\n\n`)
+      return msg
     }
   }
 

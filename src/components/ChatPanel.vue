@@ -23,7 +23,7 @@ import ChatHeader from './chat/ChatHeader.vue'
 import MessageList from './chat/MessageList.vue'
 import ComposerInput from './chat/ComposerInput.vue'
 import AddProjectModal from './chat/AddProjectModal.vue'
-import { confirmToolCall } from '../api/agent.js'
+import { confirmToolCall, abortChat } from '../api/agent.js'
 
 const error = ref('')
 const loading = ref(false)
@@ -45,6 +45,13 @@ function formatToolArgs(args) {
   } catch {
     return String(args)
   }
+}
+
+// 停止生成：通知后端中断当前会话的 Agent 循环，并立即结束本地流式渲染
+function stopGeneration() {
+  abortChat({ sessionId: sessions.activeSessionId })
+  loading.value = false
+  error.value = ''
 }
 
 // 思考强度 / 权限级别（共享 settings 实例）
@@ -336,6 +343,7 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
       :loading="loading"
       :available-skills="availableSkills"
       @send="send"
+      @stop="stopGeneration"
       @open-add="openAdd"
       @new-project-chat="newProjectChat"
     />

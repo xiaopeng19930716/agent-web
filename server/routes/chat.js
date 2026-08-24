@@ -67,6 +67,17 @@ router.post('/chat/confirm', (req, res) => {
   res.json({ ok })
 })
 
+// 按 sessionId 维护当前进行中的 AbortController（停止生成用）
+const abortControllers = new Map()
+
+// 前端「停止生成」：通知后端中断当前会话的 Agent 循环
+router.post('/chat/abort', (req, res) => {
+  const { sessionId } = req.body || {}
+  const ctrl = sessionId && abortControllers.get(sessionId)
+  if (ctrl) ctrl.abort()
+  res.json({ ok: !!ctrl })
+})
+
 router.post('/chat', async (req, res) => {
   const cfg = req.body.config || {}
   // 密钥从服务端配置文件解析，不接收前端明文
@@ -105,10 +116,20 @@ router.post('/chat', async (req, res) => {
     confirmGate = new ConfirmGate(sessionId, res)
     if (sessionId) gatesBySession.set(sessionId, confirmGate)
   }
+  // 停止生成：每个会话一个 AbortController；客户端断开或显式 /chat/abort 都会中断 Agent 循环
+  let abortController = null
+  if (sessionId) {
+    abortController = new AbortController()
+    abortControllers.set(sessionId, abortController)
+  }
   res.on('close', () => {
     if (confirmGate) {
       confirmGate.close()
       if (sessionId) gatesBySession.delete(sessionId)
+    }
+    if (abortController) {
+      abortController.abort() // 浏览器关 tab/断流即停止
+      if (sessionId) abortControllers.delete(sessionId)
     }
   })
 
@@ -137,6 +158,7 @@ router.post('/chat', async (req, res) => {
         mcpServers,
         effortHint,
         confirmGate: perm === 'ask' && projectRoot ? confirmGate : null,
+        abortSignal: abortController ? abortController.signal : null,
       }
     )
     writeMeta('ok')

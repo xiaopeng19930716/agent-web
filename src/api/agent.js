@@ -245,3 +245,16 @@ export async function confirmToolCall({ sessionId, id, decision }) {
     return { ok: false, error: String(err) }
   }
 }
+
+// 「停止生成」：通知后端中断当前会话的 Agent 循环
+export async function abortChat({ sessionId }) {
+  try {
+    await fetch('/api/chat/abort', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    })
+  } catch {
+    // 忽略网络错误（后端可能已随断流关闭）
+  }
+}

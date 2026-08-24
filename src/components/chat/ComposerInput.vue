@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from "vue";
-import { Plus, ArrowUp, Shield, Zap, AtSign, Hash, FolderOpen } from "lucide-vue-next";
+import { Plus, ArrowUp, Shield, Zap, AtSign, Hash, FolderOpen, Square } from "lucide-vue-next";
 import { settings, saveModels } from "../../settings.js";
 import { activeProjectId } from "../../projects.js";
 import { fetchFileTools } from "../../api/agent.js";
@@ -19,7 +19,7 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   availableSkills: { type: Array, default: () => [] },
 });
-const emit = defineEmits(["send", "open-add", "new-project-chat"]);
+const emit = defineEmits(["send", "stop", "open-add", "new-project-chat"]);
 
 // ===== 富文本输入框（contenteditable）=====
 const composerTokens = ref([]); // [{ type:'text', text } | { type:'tag', kind, key, label }]
@@ -383,11 +383,11 @@ defineExpose({ clear, focusComposer });
         <button
           type="button"
           class="chat__send"
-          title="发送"
-          :disabled="loading"
-          @click="triggerSend"
+          :class="{ 'chat__send--stop': loading }"
+          :title="loading ? '停止生成' : '发送'"
+          @click="loading ? emit('stop') : triggerSend()"
         >
-          <ArrowUp :size="18" />
+          <component :is="loading ? Square : ArrowUp" :size="18" />
         </button>
       </div>
     </div>
