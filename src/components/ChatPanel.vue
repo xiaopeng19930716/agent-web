@@ -284,7 +284,8 @@ async function send(payload) {
 
 // 切换项目
 async function init() {
-  await Promise.all([fetchProjects(), fetchSessions()])
+  // 左侧对话框仅加载未归档会话（archived=0）
+  await Promise.all([fetchProjects(), fetchSessions(0)])
   await Promise.all([loadAvailableSkills(), loadBaseTools()])
 }
 

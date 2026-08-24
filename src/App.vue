@@ -322,7 +322,8 @@ function syncActiveFromRoute() {
 onMounted(async () => {
   try {
     // 会话与项目并行加载，避免项目下会话在刷新后因项目列表为空而落入"未知项目"被过滤
-    await Promise.all([fetchSessions(), fetchProjects()])
+    // 左侧对话框仅加载未归档会话（archived=0）
+    await Promise.all([fetchSessions(0), fetchProjects()])
     // 会话加载完成后，用 URL 中的 sessionId 恢复当前会话
     syncActiveFromRoute()
   } catch (e) {

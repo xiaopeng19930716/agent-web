@@ -504,6 +504,18 @@ onMounted(updateToBottom)
   border-bottom-left-radius: 5px;
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
 }
+// 链接高亮：蓝色 + 下划线，hover 加深
+// 注意：v-html 渲染的 markdown 实际位于 .bubble__markdown 节点内（不是 .bubble__content 直接子节点）
+// 使用 :deep() 穿透 scoped，!important 兜底覆盖浏览器 user agent 默认 -webkit-link
+.bubble--ai.bubble .bubble__content :deep(.bubble__markdown) a {
+  color: @color-primary !important;
+  text-decoration: underline !important;
+  text-underline-offset: 2px !important;
+  word-break: break-all !important;
+}
+.bubble--ai.bubble .bubble__content :deep(.bubble__markdown) a:hover {
+  color: @color-primary-hover !important;
+}
 .bubble__content :deep(pre) {
   background: #0d1117;
   color: #e6edf3;

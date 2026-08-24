@@ -3,8 +3,15 @@ import { sessions, saveSessions } from '../lib/store.js'
 
 const router = Router()
 
-router.get('/sessions', (_req, res) => {
+router.get('/sessions', (req, res) => {
   let list = [...sessions.values()]
+  // 按归档状态过滤：空/缺省返回全部；'0' 返回未归档；'1' 返回已归档
+  const archived = req.query.archived
+  if (archived === '0') {
+    list = list.filter((s) => !s.archived)
+  } else if (archived === '1') {
+    list = list.filter((s) => s.archived)
+  }
   list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
   res.json(list)
 })

@@ -19,8 +19,11 @@ async function request(url, options) {
   return data
 }
 
-export async function fetchSessions() {
-  const list = await request('/api/sessions')
+// 获取会话列表
+// archived: undefined / '' => 全部; 0 => 仅未归档; 1 => 仅已归档
+export async function fetchSessions(archived) {
+  const qs = archived === undefined || archived === '' ? '' : `?archived=${archived}`
+  const list = await request('/api/sessions' + qs)
   sessions.list = list
   return list
 }
