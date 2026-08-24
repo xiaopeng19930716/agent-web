@@ -439,10 +439,19 @@ export function buildTools(root, permission = 'full', toolKeys, mcpServers = {})
 // 直接复用 buildTools 的产出（仅读取 name/description，不实际执行函数），
 // 因此在 buildTools 中新增 / 删除工具时，此处会自动同步，前端无需手动维护。
 export function getToolCatalog() {
-  const tools = buildTools(process.cwd(), 'full', undefined, {})
-  return tools.map((t) => ({
-    key: t.name,
-    name: t.name,
-    description: t.description || '',
-  }))
+  try {
+    const tools = buildTools(process.cwd(), 'full', undefined, {})
+    return tools.map((t) => ({
+      key: t.name,
+      name: t.name,
+      description: t.description || '',
+    }))
+  } catch (e) {
+    console.error('[tools] getToolCatalog 失败，降级返回兜底清单:', e)
+    // 兜底：至少保证 listSkills / listMcp 可见，满足"模型自动列出 skills"诉求
+    return [
+      { key: 'listSkills', name: 'listSkills', description: '列出当前系统中可加载的 Skills 清单' },
+      { key: 'listMcp', name: 'listMcp', description: '列出当前会话已配置的 MCP 服务器' },
+    ]
+  }
 }

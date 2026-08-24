@@ -3,7 +3,7 @@ import { ref, reactive, computed, nextTick, watch, onMounted } from 'vue'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
-import { ChevronDown, ChevronUp, Check, Loader2, Copy, ArrowDown, Undo2, Redo2 } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Check, Loader2, Copy, ArrowDown, Undo2, Redo2, User } from 'lucide-vue-next'
 
 marked.setOptions({
   highlight(code, lang) {
@@ -187,7 +187,17 @@ onMounted(updateToBottom)
       >
         <!-- 气泡 -->
         <div class="bubble" :class="m.role === 'user' ? 'bubble--user' : 'bubble--ai'">
-          <div v-if="m.role !== 'user'" class="bubble__avatar" aria-hidden="true">AI</div>
+          <!-- 头像：AI 蓝色渐变 + AI 字样；用户紫粉渐变 + User 图标；对称且身份可辨 -->
+          <div
+            v-if="m.role !== 'user'"
+            class="bubble__avatar"
+            aria-hidden="true"
+          >AI</div>
+          <div
+            v-else
+            class="bubble__avatar bubble__avatar--user"
+            aria-hidden="true"
+          ><User :size="14" /></div>
           <div
             v-if="m.role === 'user'"
             class="bubble__text"
@@ -203,19 +213,6 @@ onMounted(updateToBottom)
               </template>
             </template>
             <template v-else>{{ m.content }}</template>
-
-            <!-- 用户消息：回退图标，置于气泡内部底部 -->
-            <div class="bubble__footer bubble__footer--user">
-              <button
-                class="bubble__iconbtn"
-                type="button"
-                title="回退到此处：删除此消息及其之后内容，并将原文填入输入框"
-                aria-label="回退到此处"
-                @click="onEdit(m)"
-              >
-                <Undo2 :size="14" />
-              </button>
-            </div>
           </div>
           <div
             v-else
@@ -297,33 +294,44 @@ onMounted(updateToBottom)
               </div>
 
               <div class="bubble__markdown" v-html="renderMarkdown(m.content)"></div>
-
-              <!-- Agent 回答操作条：复制 + 重做（重新生成）并排 -->
-              <div class="bubble__footer bubble__footer--ai">
-                <button
-                  class="bubble__iconbtn"
-                  type="button"
-                  :disabled="m.done === false"
-                  :aria-label="copiedSet.has(i) ? '已复制' : '复制内容'"
-                  :title="m.done === false ? '思考/生成中，完成后可复制' : (copiedSet.has(i) ? '已复制' : '复制')"
-                  @click="m.done !== false && copyContent(i, m.content)"
-                >
-                  <Check v-if="copiedSet.has(i)" :size="14" />
-                  <Copy v-else :size="14" />
-                </button>
-                <button
-                  class="bubble__iconbtn"
-                  type="button"
-                  :disabled="m.done === false"
-                  title="重新生成此回答"
-                  aria-label="重新生成"
-                  @click="m.done !== false && onRegenerate(m)"
-                >
-                  <Redo2 :size="14" />
-                </button>
-              </div>
             </div>
           </div>
+        </div>
+
+        <!-- 操作条：放在气泡外部，贴近气泡边缘显示，不占用正文空间 -->
+        <div v-if="m.role === 'user'" class="msg__actions msg__actions--user">
+          <button
+            class="msg__action"
+            type="button"
+            title="回退到此处：删除此消息及其之后内容，并将原文填入输入框"
+            aria-label="回退到此处"
+            @click="onEdit(m)"
+          >
+            <Undo2 :size="14" />
+          </button>
+        </div>
+        <div v-else class="msg__actions msg__actions--ai">
+          <button
+            class="msg__action"
+            type="button"
+            :disabled="m.done === false"
+            :aria-label="copiedSet.has(i) ? '已复制' : '复制内容'"
+            :title="m.done === false ? '思考/生成中，完成后可复制' : (copiedSet.has(i) ? '已复制' : '复制')"
+            @click="m.done !== false && copyContent(i, m.content)"
+          >
+            <Check v-if="copiedSet.has(i)" :size="14" />
+            <Copy v-else :size="14" />
+          </button>
+          <button
+            class="msg__action"
+            type="button"
+            :disabled="m.done === false"
+            title="重新生成此回答"
+            aria-label="重新生成"
+            @click="m.done !== false && onRegenerate(m)"
+          >
+            <Redo2 :size="14" />
+          </button>
         </div>
       </div>
       <div v-if="error" class="chat__error">{{ error }}</div>
@@ -422,10 +430,19 @@ onMounted(updateToBottom)
   max-width: 88%;
   display: flex;
   flex-direction: column;
+  /* 头像占位变量定义在 .msg 层：.bubble 和 .msg__actions 是兄弟节点，
+     CSS 变量只能沿父链继承，定义在 .bubble 上会让操作条取不到值 */
+  --bubble-avatar-size: 26px;
+  --bubble-gap: 8px;
+  --bubble-avatar-offset: calc(var(--bubble-avatar-size) + var(--bubble-gap));
 }
 .msg--user {
   margin-left: auto;
   align-items: flex-end;
+}
+.msg--ai {
+  /* AI 子元素按 content 排列，避免 .msg__actions 在 stretch 默认下被横向拉伸 */
+  align-items: flex-start;
 }
 // ===== 气泡 =====
 .bubble {
@@ -454,6 +471,11 @@ onMounted(updateToBottom)
   letter-spacing: 0.5px;
   box-shadow: 0 2px 6px rgba(37, 99, 235, 0.35);
 }
+/* 用户头像：与 AI 蓝色形成色相互补的紫粉渐变，保持对称但身份清晰可辨 */
+.bubble__avatar--user {
+  background: linear-gradient(135deg, #a78bfa, #f0abfc);
+  box-shadow: 0 2px 6px rgba(167, 139, 250, 0.35);
+}
 .bubble__text,
 .bubble__content {
   padding: 12px 15px;
@@ -471,18 +493,51 @@ onMounted(updateToBottom)
 .bubble__copy-text {
   font-weight: 500;
 }
-/* 消息操作条：位于气泡底部，图标按钮横排 */
-.bubble__footer {
+/* 消息操作条：位于气泡外部（与气泡同级，紧贴气泡边缘），不占用正文空间 */
+.msg__actions {
   display: flex;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 4px;
+  margin-top: 4px;
 }
-.bubble__footer--user {
-  justify-content: flex-end;
+.msg__actions--user {
+  /* 用户气泡右对齐，操作条沿右边缘对齐；padding-right 让操作条右边缘
+     对齐到蓝色气泡的右边缘（而非 msg 容器右边缘，因为气泡内有 avatar + gap 占位） */
+  align-self: flex-end;
+  padding-right: var(--bubble-avatar-offset);
 }
-.bubble__footer--ai {
-  justify-content: flex-end;
+.msg__actions--ai {
+  /* AI 气泡左对齐，操作条沿左边缘对齐；padding-left 让操作条左边缘
+     对齐到白卡的左边缘（而非 msg 容器左边缘，因为气泡内有 avatar + gap 占位） */
+  align-self: flex-start;
+  padding-left: var(--bubble-avatar-offset);
 }
+.msg__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid @color-border;
+  background: #ffffff;
+  color: @color-text-muted;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+}
+.msg__action:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: @color-primary;
+  border-color: @color-primary;
+  transform: translateY(-1px);
+}
+.msg__action:active:not(:disabled) {
+  transform: translateY(0);
+}
+.msg__action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+/* 工具时间线里的「还原」按钮复用 .bubble__iconbtn，沿用原来的小尺寸样式 */
 .bubble__iconbtn {
   display: inline-flex;
   align-items: center;
@@ -505,16 +560,6 @@ onMounted(updateToBottom)
   opacity: 0.45;
   cursor: not-allowed;
   pointer-events: none;
-}
-/* 用户蓝色气泡内的图标按钮：使用半透明浅色，避免深色边框突兀 */
-.bubble--user .bubble__iconbtn {
-  border-color: rgba(255, 255, 255, 0.25);
-  color: rgba(255, 255, 255, 0.8);
-}
-.bubble--user .bubble__iconbtn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.45);
-  color: #fff;
 }
 .bubble--user .bubble__text {
   background: linear-gradient(135deg, @color-primary, @color-primary-hover);

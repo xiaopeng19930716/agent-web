@@ -12,7 +12,8 @@ router.get('/tools', (req, res) => {
     const tools = getToolCatalog()
     res.json({ tools })
   } catch (e) {
-    res.status(500).json({ error: '读取工具清单失败: ' + (e.message || String(e)) })
+    console.error('[tools] /api/tools 失败:', e) // 打印堆栈到后端控制台，便于诊断
+    res.status(500).json({ error: '读取工具清单失败: ' + (e && e.message ? e.message : String(e)) })
   }
 })
 
