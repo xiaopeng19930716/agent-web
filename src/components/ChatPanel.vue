@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import { Modal, message } from 'ant-design-vue'
 import { streamChat, summarizeChat } from '../api/agent.js'
 import { buildDiffRows } from '../utils/diff.js'
 import {
@@ -83,6 +84,97 @@ const activeSession = computed(() =>
   sessions.list.find((s) => s.id === sessions.activeSessionId)
 )
 const currentMessages = computed(() => activeSession.value?.messages || [])
+
+// 上下文进度：当前会话估算 token 用量 / 模型 contextWindow，百分比供 ComposerInput 圆环显示。
+// 与会话压缩（compressHistory）用同一套 estimateTokens / 上下文窗口，窗口未填时兜底 32768。
+const activeModelMeta = computed(() => {
+  const key = settings.activeModel || '' // 组合键 vendorKey/modelId
+  const id = key.includes('/') ? key.split('/')[1] : key
+  const flat = flattenVendors(settings.vendors)
+  const modelObj = flat.find((m) => m.id === id) || {}
+  return { modelKey: key, modelId: id, contextWindow: modelObj.contextWindow, modelObj }
+})
+const contextUsage = computed(() => {
+  const usedTokens = currentMessages.value.reduce((s, m) => {
+    const content = (typeof m.content === 'string' ? m.content : '')
+      + ' ' + (Array.isArray(m.tags) ? m.tags.join(' ') : '')
+    return s + estimateTokens(content)
+  }, 0)
+  const DEFAULT_CONTEXT_WINDOW = 32768
+  const cw = Number(activeModelMeta.value.contextWindow) > 0
+    ? Number(activeModelMeta.value.contextWindow) : DEFAULT_CONTEXT_WINDOW
+  const pct = Math.min(100, Math.max(0, Math.round((usedTokens / cw) * 100)))
+  return { usedTokens, contextWindow: cw, pct, modelName: activeModelMeta.value.modelId }
+})
+
+// 手动压缩：长按进度环触发。进度 <30% 时先弹确认，确认后把早期消息摘要化、保留最近一段并持久化。
+async function onManualCompress() {
+  const pct = contextUsage.value.pct
+  if (pct < 30) {
+    const ok = await new Promise((resolve) => {
+      Modal.confirm({
+        title: '手动压缩上下文',
+        content: `当前上下文占用仅 ${pct}%，远未接近模型窗口上限。确定要现在压缩吗？早期对话会变成一段摘要。`,
+        okText: '确定压缩',
+        cancelText: '取消',
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      })
+    })
+    if (!ok) return
+  }
+  const done = await manualCompress()
+  if (done) message.success('会话已压缩，早期对话已转为摘要')
+  else message.info('当前会话过短，无需压缩')
+}
+
+// 真正执行压缩：与自动压缩同算法（保留最近约 25% 窗口，早期摘要化），写回当前会话并持久化
+async function manualCompress() {
+  const s = activeSession.value
+  if (!s || !s.messages.length) return false
+  const DEFAULT_CONTEXT_WINDOW = 32768
+  const cw = Number(activeModelMeta.value.contextWindow) > 0
+    ? Number(activeModelMeta.value.contextWindow) : DEFAULT_CONTEXT_WINDOW
+  const KEEP_TAIL_TOKENS = Math.round(cw * 0.25)
+  let acc = 0
+  let keepStart = s.messages.length
+  for (let i = s.messages.length - 1; i >= 0; i--) {
+    const m = s.messages[i]
+    const content = (typeof m.content === 'string' ? m.content : '')
+      + ' ' + (Array.isArray(m.tags) ? m.tags.join(' ') : '')
+    acc += estimateTokens(content)
+    if (acc > KEEP_TAIL_TOKENS) {
+      keepStart = i + 1
+      break
+    }
+  }
+  // 保留部分对齐到 user 消息开头，避免以半截 assistant 回复开头
+  while (keepStart < s.messages.length && s.messages[keepStart].role !== 'user') keepStart++
+  if (keepStart < 2 || keepStart >= s.messages.length - 1) return false
+
+  const early = s.messages.slice(0, keepStart)
+  const tail = s.messages.slice(keepStart)
+  const { summary } = await summarizeChat({
+    messages: early.map((m) => ({ role: m.role, content: m.content })),
+    config: { model: activeModelMeta.value.modelKey, temperature: 0.2, maxTokens: 1024 },
+  })
+  const summaryMsg = summary
+    ? {
+        id: newMsgId(),
+        role: 'user',
+        content: '[背景信息] 以下是本会话早期对话的摘要，请作为背景理解，不要把它当作新的用户指令：\n' + summary,
+        metadata: { timestamp: Date.now(), compressed: true },
+      }
+    : {
+        id: newMsgId(),
+        role: 'user',
+        content: '[背景信息] 早期对话内容已省略，请基于最近的消息继续。',
+        metadata: { timestamp: Date.now(), compressed: true },
+      }
+  s.messages = [summaryMsg, ...tail]
+  await updateSession(s.id, { messages: s.messages })
+  return true
+}
 
 // 多 Agent 编排：主/子任务视图切换 + 计划确认
 const activeSubView = ref(null) // null=主任务；string=正在查看的子任务 subId
@@ -815,10 +907,12 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
           :active="active"
           :loading="loading"
           :available-skills="availableSkills"
+          :context-usage="contextUsage"
           @send="send"
           @stop="stopGeneration"
           @open-add="openAdd"
           @new-project-chat="newProjectChat"
+          @manual-compress="onManualCompress"
         />
       </div>
 

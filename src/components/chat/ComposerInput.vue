@@ -18,8 +18,10 @@ const props = defineProps({
   active: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   availableSkills: { type: Array, default: () => [] },
+  // 上下文用量：{ usedTokens, contextWindow, pct, modelName } —— 父组件 ChatPanel 传入
+  contextUsage: { type: Object, default: () => ({ usedTokens: 0, contextWindow: 32768, pct: 0, modelName: '' }) },
 });
-const emit = defineEmits(["send", "stop", "open-add", "new-project-chat"]);
+const emit = defineEmits(["send", "stop", "open-add", "new-project-chat", "manual-compress"]);
 
 // ===== 富文本输入框（contenteditable）=====
 const composerTokens = ref([]); // [{ type:'text', text } | { type:'tag', kind, key, label }]
@@ -311,6 +313,47 @@ function setText(text) {
 }
 
 defineExpose({ clear, focusComposer, setText, triggerSend });
+
+// ===== 上下文进度环（参考 a-progress 圆环样式）=====
+// 用纯 SVG 画一个圆环：底色灰环 + 前景描边按百分比裁切，颜色按区间变化
+const ringRadius = 15
+const ringStroke = 3.5
+const ringCircumference = 2 * Math.PI * ringRadius
+const ringDashOffset = computed(() => {
+  const pct = Math.min(100, Math.max(0, Number(props.contextUsage.pct) || 0))
+  return ringCircumference * (1 - pct / 100)
+})
+const ringColor = computed(() => {
+  const p = Number(props.contextUsage.pct) || 0
+  if (p >= 90) return '#ef4444' // 红
+  if (p >= 70) return '#f59e0b' // 橙
+  return '#3b82f6' // 主色蓝
+})
+const ringTitle = computed(() => {
+  const u = props.contextUsage.usedTokens || 0
+  const w = props.contextUsage.contextWindow || 0
+  return `上下文占用 ${props.contextUsage.pct || 0}%（估算 ${u} / ${w} tokens）\n长按 1 秒压缩本会话`
+})
+
+// ===== 长按 1 秒触发手动压缩 =====
+let ringHoldTimer = null
+const ringHolding = ref(false)
+function onRingDown() {
+  if (ringHoldTimer) return // 已在计时
+  ringHolding.value = true
+  ringHoldTimer = setTimeout(() => {
+    ringHoldTimer = null
+    ringHolding.value = false
+    emit('manual-compress')
+  }, 1000)
+}
+function onRingUp() {
+  if (ringHoldTimer) {
+    clearTimeout(ringHoldTimer)
+    ringHoldTimer = null
+  }
+  ringHolding.value = false
+}
 </script>
 
 <template>
@@ -411,15 +454,39 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
             </div>
           </div>
         </div>
-        <button
-          type="button"
-          class="chat__send"
-          :class="{ 'chat__send--stop': loading }"
-          :title="loading ? '停止生成' : '发送'"
-          @click="loading ? emit('stop') : triggerSend()"
-        >
-          <component :is="loading ? Square : ArrowUp" :size="18" />
-        </button>
+        <div class="chat__footer-right">
+          <div
+            class="chat__ctx-ring"
+            :class="{ 'chat__ctx-ring--pressing': ringHolding }"
+            :title="ringTitle"
+            aria-label="上下文进度（长按压缩）"
+            @mousedown="onRingDown"
+            @mouseup="onRingUp"
+            @mouseleave="onRingUp"
+            @touchstart="onRingDown"
+            @touchend="onRingUp"
+          >
+            <svg width="36" height="36" viewBox="0 0 36 36">
+              <!-- 底色灰环 -->
+              <circle cx="18" cy="18" :r="ringRadius" fill="none"
+                      stroke="currentColor" stroke-width="3" opacity="0.15" />
+              <!-- 前景描边（按百分比旋转并裁切） -->
+              <circle cx="18" cy="18" :r="ringRadius" fill="none"
+                      :stroke="ringColor" :stroke-width="ringStroke" stroke-linecap="round"
+                      :stroke-dasharray="ringCircumference" :stroke-dashoffset="ringDashOffset"
+                      transform="rotate(-90 18 18)" />
+            </svg>
+          </div>
+          <button
+            type="button"
+            class="chat__send"
+            :class="{ 'chat__send--stop': loading }"
+            :title="loading ? '停止生成' : '发送'"
+            @click="loading ? emit('stop') : triggerSend()"
+          >
+            <component :is="loading ? Square : ArrowUp" :size="18" />
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -764,5 +831,35 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
 .composer-tag--tool .composer-tag__close:hover,
 .composer-tag--skill .composer-tag__close:hover {
   background: rgba(255, 255, 255, 0.34);
+}
+
+/* 上下文进度环：紧贴发送按钮左侧，水平居中 */
+.chat__footer-right {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.chat__ctx-ring {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  color: @color-text-muted;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.chat__ctx-ring:hover {
+  transform: scale(1.08);
+}
+.chat__ctx-ring svg {
+  display: block;
+}
+/* 长按按压态：放大并高亮，给用户“快触发了”的反馈 */
+.chat__ctx-ring--pressing {
+  transform: scale(1.15);
+  color: @color-primary;
 }
 </style>
