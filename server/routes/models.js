@@ -1,15 +1,20 @@
 import { Router } from 'express'
 import { DEFAULT_MODEL } from '../lib/config.js'
-import { MODEL_LIST_TYPE, PRESET_VENDOR_LIST_RULES, KNOWN_CONTEXT_WINDOWS } from '../lib/modelList.js'
+import { MODEL_LIST_TYPE, PRESET_VENDOR_LIST_RULES, matchKnownById } from '../lib/modelList.js'
 
 const router = Router()
 
-// 自动获取拿不到窗口时，用内置表按模型 id 补全 contextWindow
-function withContextWindow(models) {
-  return (models || []).map((m) => ({
-    ...m,
-    contextWindow: m.contextWindow || KNOWN_CONTEXT_WINDOWS[m.id] || undefined,
-  }))
+// 自动获取拿不到时，用内置表/系列规则按模型 id 补全 contextWindow / maxTokens
+// （/models 接口通常只返回 id/name，常见模型按 id 精确表或系列前缀兜底）
+function withEnriched(models) {
+  return (models || []).map((m) => {
+    const known = matchKnownById(m && m.id)
+    return {
+      ...m,
+      contextWindow: m.contextWindow || known.contextWindow || undefined,
+      maxTokens: m.maxTokens || known.maxTokens || undefined,
+    }
+  })
 }
 
 // 模型预设（供前端下拉）
@@ -59,7 +64,7 @@ router.post('/models/fetch', async (req, res) => {
   }
   // anthropic 等无需请求，直接返回内置列表
   if (!url) {
-    res.json({ models: withContextWindow(type.parse({}, rule)) })
+    res.json({ models: withEnriched(type.parse({}, rule)) })
     return
   }
   const controller = new AbortController()
@@ -82,7 +87,7 @@ router.post('/models/fetch', async (req, res) => {
       return
     }
     const json = await r.json().catch(() => ({}))
-    res.json({ models: withContextWindow(type.parse(json, rule)) })
+    res.json({ models: withEnriched(type.parse(json, rule)) })
   } catch (e) {
     res.status(400).json({ error: e.name === 'AbortError' ? '请求超时（5s）' : String(e.message || e) })
   } finally {

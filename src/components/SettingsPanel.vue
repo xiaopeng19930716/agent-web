@@ -1,6 +1,6 @@
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
-import { Cpu, Cable, Puzzle, ArrowLeft } from 'lucide-vue-next'
+import { Cpu, Cable, Puzzle, ArrowLeft, Settings2 } from 'lucide-vue-next'
 import { sessions } from '../sessions.js'
 
 const route = useRoute()
@@ -15,6 +15,7 @@ const subMenus = [
   { key: 'models', label: '模型配置', icon: Cpu, path: '/settings/models' },
   { key: 'mcp', label: 'MCP设置', icon: Cable, path: '/settings/mcp' },
   { key: 'skills', label: 'Skills设置', icon: Puzzle, path: '/settings/skills' },
+  { key: 'advanced', label: '高级设置', icon: Settings2, path: '/settings/advanced' },
 ]
 
 const isActive = (key) => route.path.endsWith(`/${key}`) || route.path === `/settings/${key}`

@@ -114,7 +114,7 @@
         </RouterLink>
         <button class="footer-setting" type="button" @click="toggleTheme">
           <component :is="isDark ? Sun : Moon" :size="16" />
-          <span>{{ isDark ? '亮色模式' : '暗色模式' }}</span>
+          <span>{{ isDark ? '亮色' : '暗色' }}</span>
         </button>
         <RouterLink to="/settings" class="footer-setting">
           <Settings :size="16" />

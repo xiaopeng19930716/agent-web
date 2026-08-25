@@ -76,13 +76,51 @@ function idToName(s) {
     .replace(/-/g, ' ')
     .replace(/(^|\s)(\w)/g, (_, sp, c) => sp + c.toUpperCase())
 }
-// 在下拉中选择模型 ID 时，自动把模型名称按规则填充；
-// 若「获取模型列表」带出了 contextWindow，一并自动填入（用户仍可手动修改）
+// 模型 ID 系列规则（与后端 server/lib/modelList.js 的 MODEL_ID_RULES 保持一致）：
+// 在下拉项没带 contextWindow / maxTokens、或用户手敲完整 ID 时，按系列兜底填入
+const MODEL_SERIES_RULES = [
+  { re: /^qwen.*coder/i, contextWindow: 131072, maxTokens: 8192 },
+  { re: /^qwen.*plus/i, contextWindow: 131072, maxTokens: 8192 },
+  { re: /^qwen.*max/i, contextWindow: 32768, maxTokens: 8192 },
+  { re: /^qwen.*turbo/i, contextWindow: 1000000, maxTokens: 8192 },
+  { re: /^qwen/i, contextWindow: 131072, maxTokens: 8192 },
+  { re: /^deepseek/i, contextWindow: 128000, maxTokens: 8192 },
+  { re: /^glm/i, contextWindow: 128000, maxTokens: 8192 },
+  { re: /^hunyuan/i, contextWindow: 32768, maxTokens: 8192 },
+  { re: /^gpt-4o/i, contextWindow: 128000, maxTokens: 16384 },
+  { re: /^gpt-4/i, contextWindow: 128000, maxTokens: 16384 },
+  { re: /^gpt/i, contextWindow: 128000, maxTokens: 16384 },
+  { re: /^claude/i, contextWindow: 200000, maxTokens: 8192 },
+]
+function matchBySeriesRule(id) {
+  if (!id) return {}
+  for (const rule of MODEL_SERIES_RULES) {
+    if (rule.re.test(id)) return { contextWindow: rule.contextWindow, maxTokens: rule.maxTokens }
+  }
+  return {}
+}
+
+// 提取模型 ID：兼容 a-auto-complete select 事件参数（字符串或 { value } 对象）以及原生 input
+function pickIdValue(val) {
+  if (typeof val === 'string') return val
+  if (val && typeof val === 'object' && val.value !== undefined) return val.value
+  if (val && val.target && val.target.value !== undefined) return val.target.value
+  return ''
+}
+
+// 选中 / 输入模型 ID 时：填名称，并按三层优先级（接口 hit → 系列规则）自动填入上下文窗口与 maxTokens
+// 仅在对应字段为空时填入，避免覆盖用户已手动调整的值
 function onModelIdSelect(row, val) {
-  row.id = val
-  row.name = idToName(val)
-  const hit = modelIdOptions.value.find((o) => o.value === val)
-  if (hit && hit.contextWindow && !row.contextWindow) row.contextWindow = hit.contextWindow
+  const idVal = pickIdValue(val)
+  if (!idVal) return
+  row.id = idVal
+  row.name = idToName(idVal)
+  const hit = modelIdOptions.value.find((o) => o.value === idVal)
+  const fallback = matchBySeriesRule(idVal)
+  const ctx = (hit && hit.contextWindow) || fallback.contextWindow
+  const mt = (hit && hit.maxTokens) || fallback.maxTokens
+  if (ctx && !row.contextWindow) row.contextWindow = ctx
+  if (mt && !row.maxTokens) row.maxTokens = mt
 }
 
 const modelsOfVendor = computed(() => {
@@ -357,8 +395,8 @@ async function fetchModels() {
       message.error('该接口未返回任何模型')
       return
     }
-    // 将获取到的模型 ID 填入下拉，供各模型行的 a-autocomplete 选择（带 contextWindow，选中时自动填入）
-    modelIdOptions.value = models.map((m) => ({ value: m.id, label: m.id, contextWindow: m.contextWindow }))
+    // 将获取到的模型 ID 填入下拉，供各模型行的 a-autocomplete 选择（带 contextWindow / maxTokens，选中时自动填入）
+    modelIdOptions.value = models.map((m) => ({ value: m.id, label: m.id, contextWindow: m.contextWindow, maxTokens: m.maxTokens }))
     message.success(`已获取 ${models.length} 个模型，已加入模型 ID 下拉，可在各行选择`)
   } finally {
     fetchLoading.value = false
@@ -497,7 +535,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
         </label>
         <div>
           <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300">模型（名称 / ID / Max Tokens / 上下文窗口，可添加多组）</span>
+            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300">模型（名称 / ID / Max Tokens / 上下文窗口 / 温度，可添加多组）</span>
             <button
               type="button"
               :disabled="!editing || fetchLoading"
@@ -509,12 +547,12 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
             </button>
           </div>
           <div class="space-y-2">
-            <div v-for="(row, i) in form.modelRows" :key="i" class="flex items-center gap-2">
+            <div v-for="(row, i) in form.modelRows" :key="i" class="model-row">
               <a-input
                 v-model:value="row.name"
                 placeholder="模型名称（界面显示）"
                 size="middle"
-                class="flex-1 min-w-0"
+                class="model-name"
                 :disabled="!editing"
               />
               <a-auto-complete
@@ -522,12 +560,13 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
                 :options="modelIdOptions"
                 placeholder="模型 ID（发给大模型，可下拉选择）"
                 size="middle"
-                class="flex-1 min-w-0"
+                class="model-id"
                 :disabled="!editing"
                 :open="acFocusIdx === i"
                 @focus="acFocusIdx = i"
                 @blur="acFocusIdx = -1"
                 @select="(val) => onModelIdSelect(row, val)"
+                @change="(e) => onModelIdSelect(row, e)"
               />
               <a-input-number
                 v-model:value="row.maxTokens"
@@ -535,7 +574,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
                 :step="1"
                 placeholder="Max Tokens"
                 size="middle"
-                class="w-28"
+                class="w-24 model-max"
                 :disabled="!editing"
               />
               <a-input-number
@@ -544,26 +583,36 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
                 :step="1024"
                 placeholder="上下文窗口"
                 size="middle"
-                class="w-32"
+                class="w-24 model-ctx"
+                :disabled="!editing"
+              />
+              <a-input-number
+                v-model:value="row.temperature"
+                :min="0"
+                :max="2"
+                :step="0.1"
+                placeholder="温度"
+                size="middle"
+                class="w-16 model-temp"
                 :disabled="!editing"
               />
               <button
                 type="button"
                 title="添加模型行"
                 :disabled="!editing"
-                class="shrink-0 inline-flex items-center justify-center w-9 h-9 text-brand hover:text-brand-dark hover:bg-brand/10 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                class="model-add shrink-0 inline-flex items-center justify-center w-8 h-8 text-brand hover:text-brand-dark hover:bg-brand/10 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 @click="addModelRow"
               >
-                <Plus :size="18" />
+                <Plus :size="14" />
               </button>
               <button
                 type="button"
                 title="删除该模型行"
                 :disabled="!editing || form.modelRows.length <= 1"
-                class="shrink-0 inline-flex items-center justify-center w-9 h-9 text-gray-400 dark:text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                class="model-del shrink-0 inline-flex items-center justify-center w-8 h-8 text-gray-400 dark:text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 @click="removeModelRow(i)"
               >
-                <Trash2 :size="16" />
+                <Trash2 :size="14" />
               </button>
             </div>
           </div>
@@ -599,3 +648,28 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
     </section>
   </div>
 </template>
+
+<style scoped>
+/* 模型行：宽屏单行（7 列），窄屏（<1024px）自动换为两行 */
+.model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 96px 96px 64px 32px 32px;
+  gap: 6px;
+  align-items: center;
+}
+.model-id {
+  width: 100%;
+}
+@media (max-width: 1023px) {
+  .model-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .model-name { grid-column: 1; grid-row: 1; }
+  .model-id { grid-column: 2; grid-row: 1; }
+  .model-add { grid-column: 3; grid-row: 1; }
+  .model-del { grid-column: 4; grid-row: 1; }
+  .model-max { grid-column: 1; grid-row: 2; width: 100%; }
+  .model-ctx { grid-column: 2; grid-row: 2; width: 100%; }
+  .model-temp { grid-column: 3; grid-row: 2; width: 100%; }
+}
+</style>

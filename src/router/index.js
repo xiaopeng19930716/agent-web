@@ -31,6 +31,12 @@ const routes = [
         component: () => import('../components/SkillsSettings.vue'),
         meta: { title: 'Skills设置' },
       },
+      {
+        path: 'advanced',
+        name: 'settings-advanced',
+        component: () => import('../components/AdvancedSettings.vue'),
+        meta: { title: '高级设置' },
+      },
     ],
   },
   {

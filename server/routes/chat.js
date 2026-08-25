@@ -185,7 +185,7 @@ router.post('/chat', async (req, res) => {
     return
   }
 
-  const { messages, projectId, permission, effort, tools, skills, mcpServers, sessionId, planMode } = req.body
+  const { messages, projectId, permission, effort, tools, skills, mcpServers, sessionId, planMode, planTemperature, execTemperature, subAgentMaxTurns, allowReplan, subModelKey, commandTimeout, modelTemperature } = req.body
   // 权限级别：read-only(只读) / full(完全访问) / ask(需确认) / none(不允许)；默认 full
   let perm = 'full'
   if (permission === 'read-only' || permission === 'none') perm = permission
@@ -266,6 +266,14 @@ router.post('/chat', async (req, res) => {
           confirmGate: perm === 'ask' ? confirmGate : null,
           abortSignal: abortController ? abortController.signal : null,
           sessionId: sessionId || null,
+          // 高级设置：温度/轮数/重规划/子 Agent 模型 + 模型配置快照（供各阶段按需重建模型）
+          modelCfg: { ...cfg, enableThinking, modelTemperature },
+          planTemperature,
+          execTemperature,
+          subAgentMaxTurns,
+          allowReplan,
+          subModelKey,
+          commandTimeout,
         }
       )
     } else {
@@ -286,6 +294,7 @@ router.post('/chat', async (req, res) => {
           confirmGate: perm === 'ask' ? confirmGate : null,
           abortSignal: abortController ? abortController.signal : null,
           sessionId: sessionId || null,
+          commandTimeout,
         }
       )
     }

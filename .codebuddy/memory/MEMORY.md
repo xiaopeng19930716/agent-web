@@ -17,7 +17,7 @@
 | #3 | 多轮编辑/重新生成 | ✅ | regenerate + 编辑历史消息后重试均已落地（用户 2026-08-25 确认） |
 | #4 | 消息内代码块操作（应用到文件/编辑器打开） | ⏸ 暂搁置 | 仅复制；缺「应用到文件」 |
 | #5 | 导出对话（MD/JSON）、清屏 | ⏸ 暂搁置 | 用户 2026-08-25 说暂搁置 |
-| #6 | 多 Agent/子任务编排（plan→execute） | ✅ 完成 | P1–P8 全部完成，lint/build/语法校验通过（含后端静默计划阶段崩溃修复 + settings.planMode 持久化）；浏览器端到端联调建议本地 `npm run dev:all` 实测 |
+| #6 | 多 Agent/子任务编排（plan→execute） | ✅ 完成 | P1–P8 完成 + 2026-08-25 加固：① 计划模式强制只读——`runPlanPhase` 工具集限为只读清单（listFiles/readFile/searchInProject/listMcp/listSkills/todoWrite）+ 权限降级 read-only + 系统提示只读，写文件/执行命令彻底不可用；② 子 Agent 可中断——`abortSignal` 全链路透传（runAgent/runSubAgent/汇总/工具重试），`executeCommand` 中止时 `killProcessTree` 杀进程树（win32 taskkill /T /F，POSIX 进程组 SIGTERM），主界面停止 → 子 Agent 同步停；③ MCP 工具三层只读标记（annotations.readOnlyHint/destructiveHint → 服务器配置 readOnly 开关 → 启发式兜底），计划模式仅放行只读 MCP 工具，ask 模式 MCP 写工具也纳入确认闸门；前端 McpSettings.vue 新增「计划模式下放行」开关 |
 | #7 | 待办/任务清单 todo | ✅ | TodoPanel.vue + todoWrite 工具 + todo_update 事件 |
 | #8 | 增量文件编辑确认带 diff | ✅ | tool_confirm 事件 + confirm-diff 预览 + 允许/拒绝 |
 | #9 | 图像/截图理解 | ✅ | |
@@ -27,6 +27,7 @@
 | #13 | 暗色模式 | ✅ | |
 | #14 | Cmd+Enter / Enter 发送 | ✅ | |
 | #16 | 首 token 延迟显示 | ✅ | |
+| #17 | 高级设置：计划/执行阶段温度 | ✅ 完成 | 2026-08-25：① 模型设置页每模型补上温度输入框（0~2 step 0.1，存 options.temperature）；② 新增设置子菜单「高级设置」页 /settings/advanced（AdvancedSettings.vue）：计划模式温度默认 0.7（规划发散）、执行模式温度默认空=跟随主模型（执行严谨）；③ settings.js 新增 planTemperature/execTemperature 并持久化；④ 后端 useStageModel() 按阶段重建模型：runPlanPhase 用 planTemperature、runSubAgent 用 execTemperature，未设置/非法时沿用主模型 | 
 | #13b | 代理/网络配置（baseURL、系统代理） | 🚫 不做 | 用户 2026-08-25 确认不做 |
 
 ### 剩余未做：无 ｜ 暂搁置：#4 #5 ｜ 不做：#13b

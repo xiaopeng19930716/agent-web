@@ -163,7 +163,7 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
   // 文件工具边界：有项目用项目根；无项目用用户主目录（fileRoot 由路由层给定），
   // 这样无项目对话也能读取/查询桌面、文档等主目录下的文件，同时 safeResolve 仍约束不能越界。
   const toolRoot = fileRoot || projectRoot || os.homedir()
-  const { modelWithTools, toolMap } = buildModelWithTools(model, toolRoot, permission, enabledTools, mcpTools, mcpServers, [], abortSignal)
+  const { modelWithTools, toolMap } = buildModelWithTools(model, toolRoot, permission, enabledTools, mcpTools, mcpServers, [], abortSignal, opts.commandTimeout)
   const messages = buildSystemMessages(history, skillPrompts, effortHint, { permission, projectRoot })
 
   const MAX_TURNS = 12
@@ -193,10 +193,44 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
   }
 }
 
+// 按阶段应用温度：仅当提供模型配置快照且温度合法（0~2）时重建模型，否则沿用传入模型
+function useStageModel(baseModel, callbacks, modelCfg, temperature) {
+  if (!modelCfg || typeof modelCfg !== 'object') return baseModel
+  if (typeof temperature !== 'number' || !Number.isFinite(temperature) || temperature < 0 || temperature > 2) return baseModel
+  return buildChatModel({ ...modelCfg, temperature }, callbacks)
+}
+
+// 构建子 Agent 模型：
+// 1) 若指定了独立的子 Agent 模型（subModelKey，组合键 vendor/modelId），用该模型重建（覆盖主模型）；
+// 2) 否则沿用主模型。
+// 温度优先级：模型设置页配置的温度（modelCfg.modelTemperature）> 高级设置执行温度 > 0.3。
+// 返回 { model, isCustom }，isCustom 表示是否单独指定了模型。
+function buildSubAgentModel(baseModel, callbacks, modelCfg, opts = {}) {
+  const { execTemperature = 0.3, subModelKey = '' } = opts
+  const hasSubKey = typeof subModelKey === 'string' && subModelKey.trim() !== ''
+  const hasExecTemp = typeof execTemperature === 'number' && Number.isFinite(execTemperature) && execTemperature >= 0 && execTemperature <= 2
+  const base = (modelCfg && typeof modelCfg === 'object') ? modelCfg : {}
+  const isModelTempValid = typeof base.modelTemperature === 'number' && Number.isFinite(base.modelTemperature) && base.modelTemperature >= 0 && base.modelTemperature <= 2
+  // 模型设置页配置了温度则优先使用模型温度，否则回落到高级设置执行温度（默认 0.3）
+  const effectiveTemp = isModelTempValid ? base.modelTemperature : (hasExecTemp ? execTemperature : 0.3)
+
+  if (hasSubKey) {
+    // 独立模型：用主模型配置作为基底（密钥/地址/思考开关），仅替换 model，温度按上述优先级
+    return { model: buildChatModel({ ...base, model: subModelKey, temperature: effectiveTemp }, callbacks), isCustom: true }
+  }
+  // 无独立模型：主模型已按模型配置温度构建；
+  // 仅当模型未配置温度、且高级设置执行温度与主模型当前温度不同时才重建
+  const mainTemp = typeof base.temperature === 'number' ? base.temperature : 0.3
+  if (!isModelTempValid && hasExecTemp && execTemperature !== mainTemp) {
+    return { model: buildChatModel({ ...base, temperature: execTemperature }, callbacks), isCustom: false }
+  }
+  return { model: baseModel, isCustom: false }
+}
+
 // 组装工具（文件工具受项目目录安全边界约束 + MCP 工具），并绑定到模型
 // 没有工具时返回原模型，避免 bindTools([]) 行为异常
-function buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools, mcpServers = {}, extraTools = [], abortSignal = null) {
-  const tools = [...extraTools, ...buildTools(projectRoot, permission, enabledTools, mcpServers, abortSignal), ...mcpTools]
+function buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools, mcpServers = {}, extraTools = [], abortSignal = null, commandTimeout = 300) {
+  const tools = [...extraTools, ...buildTools(projectRoot, permission, enabledTools, mcpServers, abortSignal, commandTimeout), ...mcpTools]
   const toolMap = Object.fromEntries(tools.map((t) => [t.name, t]))
   const modelWithTools = tools.length ? model.bindTools(tools) : model
   return { modelWithTools, toolMap }
@@ -494,11 +528,15 @@ function buildPlanSystemPrompt(permission, projectRoot) {
 }
 
 // 子 Agent（执行者）系统提示：专注单一子任务
-function buildSubAgentSystemPrompt(task, permission, projectRoot) {
+// allowReplan：开启后允许子 Agent 在执行中发现必要的新增工作时调用 planTasks 追加子任务
+function buildSubAgentSystemPrompt(task, permission, projectRoot, allowReplan = false) {
   return (
     buildSystemPrompt({ permission, projectRoot }) +
     '\n\n你是一个「子任务执行者」Agent，只负责完成分配给你的单一子任务。请使用工具实际执行（读取、修改文件或运行命令），完成后用简短文字说明你做了什么、产出了什么。' +
-    '不要重新规划整体任务，专注当前子任务本身。'
+    '不要重新规划整体任务，专注当前子任务本身。' +
+    (allowReplan
+      ? '\n如果完成当前子任务后发现还有必须补充的工作（且确实依赖当前进度、需要系统继续执行），可调用 planTasks 提交这些新增子任务；系统会在当前子任务结束后继续执行。仅在确有必要时使用，不要用它重复描述已完成的计划。'
+      : '')
   )
 }
 
@@ -520,8 +558,10 @@ async function runPlanPhase(model, history, projectRoot, res, permission, callba
   // 计划模式严禁任何写操作：仅开放只读探索工具 + planTasks + 被判定为只读的 MCP 工具，并把权限降级为 read-only（双保险）
   const PLAN_READONLY_TOOLS = ['listFiles', 'readFile', 'searchInProject', 'listMcp', 'listSkills', 'todoWrite']
   const planMcpTools = (opts.mcpTools || []).filter((t) => (t.metadata?.risk || t.risk) !== 'write')
+  // 计划阶段可单独用更高的温度（默认 0.7），让需求澄清/任务拆解更发散
+  const planModel = useStageModel(model, callbacks, opts.modelCfg, opts.planTemperature)
   const { modelWithTools, toolMap } = buildModelWithTools(
-    model, toolRoot, 'read-only', PLAN_READONLY_TOOLS, planMcpTools, opts.mcpServers, [planTasksTool], opts.abortSignal
+    planModel, toolRoot, 'read-only', PLAN_READONLY_TOOLS, planMcpTools, opts.mcpServers, [planTasksTool], opts.abortSignal, opts.commandTimeout
   )
   const sysText = buildPlanSystemPrompt('read-only', projectRoot)
   const messages = [new SystemMessage(sysText), ...history]
@@ -555,16 +595,27 @@ async function runPlanPhase(model, history, projectRoot, res, permission, callba
 }
 
 // 单个子 Agent 执行：独立 Agent 循环，事件带 subId 供前端区分主/子
+// 返回 { summary, replanItems }：summary 为执行摘要；replanItems 为子 Agent 追加的新子任务（重规划开启时）
 async function runSubAgent({ model, history, projectRoot, res, permission, callbacks, opts, task, subId, abortSignal }) {
   const toolRoot = opts.fileRoot || projectRoot || os.homedir()
-  const { modelWithTools, toolMap } = buildModelWithTools(model, toolRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers, [], abortSignal)
-  const sysText = buildSubAgentSystemPrompt(task, permission, projectRoot)
+  // 执行阶段：可单独指定模型（subModelKey）与执行温度；都未设置时沿用主模型
+  const { model: subModel } = buildSubAgentModel(model, callbacks, opts.modelCfg, opts)
+  // 重规划开启时开放 planTasks，允许子 Agent 追加子任务
+  const allowReplan = !!opts.allowReplan
+  const { modelWithTools, toolMap } = buildModelWithTools(
+    subModel, toolRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers,
+    allowReplan ? [planTasksTool] : [], abortSignal, opts.commandTimeout
+  )
+  const sysText = buildSubAgentSystemPrompt(task, permission, projectRoot, allowReplan)
   const messages = [
     new SystemMessage(sysText),
     ...history,
     new HumanMessage(`子任务：\n标题：${task.title}\n说明：${task.description || '(无)'}\n\n请专注完成这个子任务，使用工具实际执行，并给出简短结果。`),
   ]
-  const MAX_TURNS = 12
+  const MAX_TURNS = typeof opts.subAgentMaxTurns === 'number' && opts.subAgentMaxTurns > 0
+    ? Math.min(50, Math.floor(opts.subAgentMaxTurns))
+    : 12
+  const replanItems = []
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     if (abortSignal?.aborted) break
     const { aiContent, toolCalls } = await streamModelTurn(modelWithTools, messages, res, callbacks, abortSignal, subId)
@@ -572,6 +623,20 @@ async function runSubAgent({ model, history, projectRoot, res, permission, callb
     if (!toolCalls.length) break
     for (const call of toolCalls) {
       if (abortSignal?.aborted) break
+      // 子 Agent 追加计划：收集后回传给编排层，在当前子任务之后继续执行
+      if (allowReplan && call.name === 'planTasks') {
+        const items = normalizePlan(call.args && call.args.items)
+        if (items.length) {
+          replanItems.push(...items)
+          messages.push(new ToolMessage({
+            content: `已收到新增子任务（${items.length} 项），系统将在当前子任务结束后继续执行。`,
+            tool_call_id: call.id,
+          }))
+        } else {
+          messages.push(new ToolMessage({ content: '未收到有效的子任务清单。', tool_call_id: call.id }))
+        }
+        continue
+      }
       const r = await executeToolCall(call, toolMap, res, {
         toolRoot, permission, confirmGate: opts.confirmGate, abortSignal, sessionId: opts.sessionId, subId,
       })
@@ -580,7 +645,8 @@ async function runSubAgent({ model, history, projectRoot, res, permission, callb
     if (abortSignal?.aborted) break
   }
   const lastAI = [...messages].reverse().find((m) => m._getType && m._getType() === 'ai')
-  return lastAI && typeof lastAI.content === 'string' ? lastAI.content.trim() : ''
+  const summary = lastAI && typeof lastAI.content === 'string' ? lastAI.content.trim() : ''
+  return { summary, replanItems }
 }
 
 // 纯文本回复（规划失败回退 / 最终汇总），只输出正文
@@ -614,7 +680,7 @@ export function cancelPlanConfirm(sessionId) {
 
 // 顶层编排：plan→execute→summarize（串行执行子 Agent）
 export async function runPlanAndExecute(model, history, projectRoot, res, permission = 'full', callbacks, opts = {}) {
-  const { abortSignal = null, sessionId = null } = opts
+  const { abortSignal = null, sessionId = null, modelCfg = null, planTemperature = null, execTemperature = null, subModelKey = '', subAgentMaxTurns = 12, allowReplan = false, commandTimeout = 300 } = opts
 
   // ===== Phase 1: Plan =====
   res.write(`data: ${JSON.stringify({ type: 'phase', phase: 'plan', status: 'start' })}\n\n`)
@@ -663,9 +729,14 @@ export async function runPlanAndExecute(model, history, projectRoot, res, permis
     }
     const subId = `sub-${sessionId || 's'}-${i}-${Date.now()}`
     res.write(`data: ${JSON.stringify({ type: 'subagent_start', id: subId, index: i, title: task.title, description: task.description, status: 'start' })}\n\n`)
-    const summary = await runSubAgent({ model, history, projectRoot, res, permission, callbacks, opts, task, subId, abortSignal })
+    const subRes = await runSubAgent({ model, history, projectRoot, res, permission, callbacks, opts, task, subId, abortSignal })
+    const summary = (subRes && subRes.summary) || ''
     res.write(`data: ${JSON.stringify({ type: 'subagent_end', id: subId, index: i, status: 'end', summary: summary || '(无摘要)' })}\n\n`)
     summaries.push({ title: task.title, summary })
+    // 子 Agent 重规划追加的新任务：追加到计划末尾，由本循环继续执行
+    if (subRes && subRes.replanItems && subRes.replanItems.length) {
+      plan.push(...subRes.replanItems)
+    }
     if (abortSignal?.aborted) break
   }
 
@@ -676,7 +747,7 @@ export async function runPlanAndExecute(model, history, projectRoot, res, permis
     const sysText = buildSystemPrompt({ permission: 'full', projectRoot: '' }) +
       '\n\n你正在对刚刚由多个子 Agent 协作完成的任务做最终汇总。请基于各子任务的执行结果，向用户给出清晰、简洁的整体结论、关键产出与后续建议。'
     const messages = [new SystemMessage(sysText), ...history, new HumanMessage(`以下是各子任务的执行结果，请据此给出整体总结与结论：\n\n${summaryText}`)]
-    const { modelWithTools, toolMap } = buildModelWithTools(model, opts.fileRoot || projectRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers, [], opts.abortSignal)
+    const { modelWithTools, toolMap } = buildModelWithTools(model, opts.fileRoot || projectRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers, [], opts.abortSignal, opts.commandTimeout)
     await runSimpleReply(modelWithTools, toolMap, messages, res, callbacks, { ...opts, permission })
   }
   res.write(`data: ${JSON.stringify({ type: 'phase', phase: 'done', status: 'end' })}\n\n`)

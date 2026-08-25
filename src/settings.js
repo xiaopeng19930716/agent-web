@@ -131,6 +131,12 @@ export const settings = reactive({
   disabledMcpServers: [],
   enabledSkills: [],
   planMode: false, // 计划模式开关：ComposerInput 左侧「计划」按钮，开启后走 plan→execute 编排
+  planTemperature: 0.7, // 高级设置：计划阶段温度（需求澄清/拆解任务，取高一点更发散）；null 未设置时跟随主模型
+  execTemperature: 0.3, // 高级设置：子 Agent 执行阶段温度（兜底，默认 0.3）；模型设置页配置了温度则优先用模型温度
+  subAgentMaxTurns: 12, // 高级设置：子 Agent 最大执行轮数
+  allowReplan: false, // 高级设置：允许子 Agent 在执行中发现必要新增工作时追加子任务
+  commandTimeout: 300, // 高级设置：命令执行超时上限（秒）
+  subModelKey: '', // 高级设置：子 Agent 独立模型（组合键 vendorKey/modelId）；空=跟随主模型
 })
 
 // 仅 MCP 相关字段
@@ -260,6 +266,14 @@ async function initOthers() {
     settings.enabledSkills = Array.isArray(data.enabledSkills) ? data.enabledSkills : []
     // 计划模式开关：缺省为关闭；仅当显式为布尔值时采用，避免脏数据
     settings.planMode = typeof data.planMode === 'boolean' ? data.planMode : false
+    // 高级设置：计划/执行阶段温度；仅接受合法数值，缺省用默认值
+    settings.planTemperature = isValidTemperature(data.planTemperature) ? data.planTemperature : 0.7
+    settings.execTemperature = isValidTemperature(data.execTemperature) ? data.execTemperature : 0.3
+    // 高级设置：编排行为 / 执行安全 / 子 Agent 模型
+    settings.subAgentMaxTurns = typeof data.subAgentMaxTurns === 'number' && data.subAgentMaxTurns > 0 ? Math.floor(data.subAgentMaxTurns) : 12
+    settings.allowReplan = !!data.allowReplan
+    settings.commandTimeout = typeof data.commandTimeout === 'number' && data.commandTimeout > 0 ? Math.floor(data.commandTimeout) : 300
+    settings.subModelKey = typeof data.subModelKey === 'string' ? data.subModelKey : ''
   } catch (e) {
     console.error('加载其余配置失败，使用默认值:', e)
   }
@@ -310,11 +324,45 @@ async function saveOthers() {
     await fetch('/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabledSkills: settings.enabledSkills, planMode: !!settings.planMode }),
+      body: JSON.stringify({
+        enabledSkills: settings.enabledSkills,
+        planMode: !!settings.planMode,
+        planTemperature: settings.planTemperature,
+        execTemperature: settings.execTemperature,
+        subAgentMaxTurns: settings.subAgentMaxTurns,
+        allowReplan: settings.allowReplan,
+        commandTimeout: settings.commandTimeout,
+        subModelKey: settings.subModelKey,
+      }),
     })
   } catch (e) {
     console.error('保存其余配置失败:', e)
   }
+}
+
+// 仅回写高级设置（温度/编排行为/执行安全/子 Agent 模型）
+export async function saveAdvanced() {
+  try {
+    await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        planTemperature: settings.planTemperature,
+        execTemperature: settings.execTemperature,
+        subAgentMaxTurns: settings.subAgentMaxTurns,
+        allowReplan: settings.allowReplan,
+        commandTimeout: settings.commandTimeout,
+        subModelKey: settings.subModelKey,
+      }),
+    })
+  } catch (e) {
+    console.error('保存高级设置失败:', e)
+  }
+}
+
+// 温度合法性校验：0~2 之间的有限数字
+function isValidTemperature(v) {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 2
 }
 
 export async function resetSettings() {
@@ -328,6 +376,12 @@ export async function resetSettings() {
     disabledMcpServers: [],
     enabledSkills: [],
     planMode: false,
+    planTemperature: 0.7,
+    execTemperature: 0.3,
+    subAgentMaxTurns: 12,
+    allowReplan: false,
+    commandTimeout: 300,
+    subModelKey: '',
   })
   // 双保险：剔除仍在 configuredVendors 里但 API Key 为空的供应商（默认壳不应算"已配置"）
   settings.configuredVendors = settings.configuredVendors.filter((k) => {

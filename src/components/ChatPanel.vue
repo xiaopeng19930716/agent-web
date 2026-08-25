@@ -386,6 +386,15 @@ async function runAssistantTurn(session, options = {}) {
 
   await streamChat(finalHistory, {
     planMode,
+    // 高级设置：计划/执行阶段温度（仅 planMode 编排时由后端消费）
+    planTemperature: typeof settings.planTemperature === 'number' ? settings.planTemperature : undefined,
+    execTemperature: typeof settings.execTemperature === 'number' ? settings.execTemperature : undefined,
+    subAgentMaxTurns: typeof settings.subAgentMaxTurns === 'number' ? settings.subAgentMaxTurns : undefined,
+    allowReplan: !!settings.allowReplan,
+    commandTimeout: typeof settings.commandTimeout === 'number' ? settings.commandTimeout : undefined,
+    subModelKey: settings.subModelKey || undefined,
+    // 模型设置页里该模型显式配置的温度（未配置为 undefined，供子 Agent 温度优先级判断）
+    modelTemperature: typeof modelObj.temperature === 'number' ? modelObj.temperature : undefined,
     config: {
       model: activeModelKey, // 发送组合键，便于后端解析 apiKey
       temperature: typeof modelObj.temperature === 'number' ? modelObj.temperature : 0.3,

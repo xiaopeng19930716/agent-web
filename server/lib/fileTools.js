@@ -207,7 +207,7 @@ export function searchFiles(root, keyword, maxResults = 50) {
   return out
 }
 
-export function buildTools(root, permission = 'full', toolKeys, mcpServers = {}, abortSignal = null) {
+export function buildTools(root, permission = 'full', toolKeys, mcpServers = {}, abortSignal = null, commandTimeout = 300) {
   // permission: 'full' 可写；'read-only' / 'none' 禁止写入文件
   // toolKeys：可选，允许启用的工具 key（listFiles/readFile/writeFile/editFile/searchInProject/listMcp/listSkills）。
   // 未传或非数组 -> 返回全部；空数组 -> 返回 []；否则按 key 过滤。
@@ -327,9 +327,11 @@ export function buildTools(root, permission = 'full', toolKeys, mcpServers = {},
           } catch (e) {
             return '路径越界，无法在目录外执行命令: ' + String(e.message || e)
           }
+          // 命令超时上限来自高级设置（commandTimeout 秒），默认 300；防止卡死
+          const maxMs = (Number(commandTimeout) > 0 ? Number(commandTimeout) : 300) * 1000
           let ms = Number(timeout)
-          if (!Number.isFinite(ms) || ms <= 0) ms = 60000
-          ms = Math.min(ms, 5 * 60 * 1000) // 上限 5 分钟，防止卡死
+          if (!Number.isFinite(ms) || ms <= 0) ms = Math.min(60000, maxMs)
+          ms = Math.min(ms, maxMs)
           const truncate = (s) =>
             s.length > MAX_CMD_OUTPUT ? s.slice(0, MAX_CMD_OUTPUT) + `\n… (输出已截断，原始共 ${s.length} 字符)` : s
           // 用回调式 exec 以便支持「停止」中断：abort 时杀掉整个进程树，避免命令在后台继续跑
@@ -367,13 +369,13 @@ export function buildTools(root, permission = 'full', toolKeys, mcpServers = {},
       {
         name: 'executeCommand',
         description:
-          '在项目目录下执行 shell 命令，例如安装依赖(npm install)、运行测试(npm test)、构建(npm run build)、git 操作等。command 为完整命令；cwd 为相对项目根目录的工作目录，默认 "."；timeout 为超时毫秒（上限 5 分钟）。需要「完全访问」权限。注意：会真正执行命令，请谨慎使用。',
+          '在项目目录下执行 shell 命令，例如安装依赖(npm install)、运行测试(npm test)、构建(npm run build)、git 操作等。command 为完整命令；cwd 为相对项目根目录的工作目录，默认 "."；timeout 为超时毫秒数（默认 60000，上限见高级设置「命令超时上限」）。需要「完全访问」权限。注意：会真正执行命令，请谨慎使用。',
         schema: {
           type: 'object',
           properties: {
             command: { type: 'string', description: '要执行的完整 shell 命令' },
             cwd: { type: 'string', description: '相对项目根目录的工作目录，默认 "."' },
-            timeout: { type: 'number', description: '超时毫秒数，默认 60000，上限 300000' },
+            timeout: { type: 'number', description: '超时毫秒数，默认 60000，上限以高级设置为准' },
           },
           required: ['command'],
         },
