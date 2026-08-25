@@ -18,10 +18,17 @@ export async function streamChat(
     onToolCall,
     onToolConfirm,
     onTodoUpdate,
+    onPlan,
+    onSubAgentStart,
+    onSubAgentDelta,
+    onSubAgentTool,
+    onSubAgentEnd,
+    onPhase,
     onDone,
     onError,
     onReconnecting,
     onReset,
+    planMode,
   } = {}
 ) {
   // 单次流式请求：返回 'done' | 'error' | 'dropped'
@@ -34,7 +41,7 @@ export async function streamChat(
       resp = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages, config, projectId, permission, effort, tools, skills, mcpServers, sessionId }),
+        body: JSON.stringify({ messages, config, projectId, permission, effort, tools, skills, mcpServers, sessionId, planMode }),
       })
     } catch (err) {
       // 网络层失败（连接被拒 / 断网）：视为断流，交给外层重连
@@ -90,6 +97,30 @@ export async function streamChat(
             }
             if (json.type === 'todo_update') {
               onTodoUpdate?.(json.todos)
+              continue
+            }
+            if (json.type === 'plan') {
+              onPlan?.(json)
+              continue
+            }
+            if (json.type === 'subagent_start') {
+              onSubAgentStart?.(json)
+              continue
+            }
+            if (json.type === 'subagent_delta') {
+              onSubAgentDelta?.(json)
+              continue
+            }
+            if (json.type === 'subagent_tool') {
+              onSubAgentTool?.(json)
+              continue
+            }
+            if (json.type === 'subagent_end') {
+              onSubAgentEnd?.(json)
+              continue
+            }
+            if (json.type === 'phase') {
+              onPhase?.(json)
               continue
             }
             const delta = json.choices?.[0]?.delta?.content || ''

@@ -28,6 +28,7 @@ import { onBus, emitBus } from '../bus.js'
 import ChatLogDrawer from './ChatLogDrawer.vue'
 import ChatHeader from './chat/ChatHeader.vue'
 import MessageList from './chat/MessageList.vue'
+import SubAgentPanel from './chat/SubAgentPanel.vue'
 import SessionChanges from './chat/SessionChanges.vue'
 import TodoPanel from './chat/TodoPanel.vue'
 import ComposerInput from './chat/ComposerInput.vue'
@@ -82,6 +83,48 @@ const activeSession = computed(() =>
   sessions.list.find((s) => s.id === sessions.activeSessionId)
 )
 const currentMessages = computed(() => activeSession.value?.messages || [])
+
+// 多 Agent 编排：主/子任务视图切换 + 计划确认
+const activeSubView = ref(null) // null=主任务；string=正在查看的子任务 subId
+const planConfirm = ref(null) // 计划确认卡片数据：[{ id, title, description, enabled }]
+const planConfirmAssistant = ref(null) // 取消时用于标记当前 assistant 消息
+const activeSubAgent = computed(() => {
+  const s = activeSession.value
+  if (!s || !activeSubView.value) return null
+  const a = s.messages.find((m) => m.subAgents && m.subAgents[activeSubView.value])
+  return a ? a.subAgents[activeSubView.value] : null
+})
+// 用户确认计划：把未勾选（跳过）的子任务 id 回传后端，唤醒挂起的编排
+function confirmPlan() {
+  const items = planConfirm.value || []
+  const skipped = items.filter((it) => !it.enabled).map((it) => it.id)
+  planConfirm.value = null
+  fetch('/api/chat/plan-confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: sessions.activeSessionId, skipped }),
+  }).catch(() => {})
+}
+// 用户取消计划：关闭弹窗、通知后端取消、中断 Agent 循环，并把 assistant 标记为已取消
+function cancelPlan() {
+  const a = planConfirmAssistant.value
+  planConfirm.value = null
+  planConfirmAssistant.value = null
+  const sid = sessions.activeSessionId
+  if (sid) {
+    fetch('/api/chat/plan-confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: sid, cancel: true }),
+    }).catch(() => {})
+    abortChat({ sessionId: sid }).catch(() => {})
+  }
+  if (a) {
+    a.done = true
+    a.reasoningDone = true
+    a.error = '已取消计划执行'
+  }
+}
 
 const showLog = ref(false)
 // 是否展示右侧「文件变更」面板（头部「查看变更」按钮切换）
@@ -219,7 +262,7 @@ async function compressHistory(history, config) {
 
 // 发送：组装与服务调用在容器；前置检查与 DOM 已由 ComposerInput 处理
 async function send(payload) {
-  const { composerTokens, sessionToolCmds, selectedSkills, selectedMcp } = payload
+  const { composerTokens, sessionToolCmds, selectedSkills, selectedMcp, planMode = false } = payload
 
   // 确保基础工具清单已加载（首次进入尚未拉取时兜底）
   if (!baseTools.value.length) await loadBaseTools()
@@ -286,14 +329,14 @@ async function send(payload) {
   // 清空富文本输入框（委托子组件）
   composerRef.value?.clear()
 
-  await runAssistantTurn(session, { text, pid, fileTools, skillIds, mcpServersPayload })
+  await runAssistantTurn(session, { text, pid, fileTools, skillIds, mcpServersPayload, planMode })
 }
 
 // 基于 session 中已有的上下文（最后一条为 user 消息）生成 assistant 回复。
 // 只追加 assistant 消息并流式生成，不会新增 user 消息。
 // send 与 regenerate 共用：send 先 push user 再调用；regenerate 直接调用。
 async function runAssistantTurn(session, options = {}) {
-  const { text = '', pid = active.value?.id ?? null, fileTools = [], skillIds = [], mcpServersPayload = {}, prevReasoning = '' } = options
+  const { text = '', pid = active.value?.id ?? null, fileTools = [], skillIds = [], mcpServersPayload = {}, prevReasoning = '', planMode = false } = options
   const assistant = reactive({
     id: newMsgId(),
     role: 'assistant',
@@ -304,9 +347,13 @@ async function runAssistantTurn(session, options = {}) {
     done: false, // 思考+生成全部完成（或出错）后才允许复制
     showThinking: true, // 始终保留思考区（含完成态「✓ 思考完成」），避免生成后思考区消失
     toolCalls: [], // [{ name, args, status, result }]
+    plan: null, // 计划模式：[{ id, title, description }]
+    subAgentRefs: [], // 子任务入口：[{ id, title, status }]
+    subAgents: {}, // 子 Agent 详情：{ [subId]: { id, title, description, status, summary, messages } }
     metadata: {},
   })
   session.messages.push(assistant)
+  planConfirmAssistant.value = assistant
   loading.value = true
   let gotNewReasoning = false // 标记模型是否已返回新推理，用于清除重做占位
 
@@ -338,6 +385,7 @@ async function runAssistantTurn(session, options = {}) {
   let firstTokenMs = null // 首个 content 字符到达耗时（毫秒），null 表示未收到
 
   await streamChat(finalHistory, {
+    planMode,
     config: {
       model: activeModelKey, // 发送组合键，便于后端解析 apiKey
       temperature: typeof modelObj.temperature === 'number' ? modelObj.temperature : 0.3,
@@ -401,6 +449,64 @@ async function runAssistantTurn(session, options = {}) {
       if (!assistant.reasoningDone && assistant.reasoning) assistant.reasoningDone = true
       assistant.content += delta
     },
+    // ===== 多 Agent 编排：计划 → 子任务 =====
+    onPlan: (payload) => {
+      if (payload.items) assistant.plan = payload.items
+      // 计划已产出，等待用户确认（可勾选跳过部分子任务）
+      if (payload.status === 'await_confirm') planConfirm.value = (payload.items || []).map((it) => ({ ...it, enabled: true }))
+    },
+    onSubAgentStart: (p) => {
+      if (!assistant.subAgents) assistant.subAgents = {}
+      assistant.subAgents[p.id] = {
+        id: p.id,
+        index: p.index,
+        title: p.title,
+        description: p.description,
+        status: p.status || 'start',
+        summary: '',
+        messages: [],
+      }
+      if (!assistant.subAgentRefs) assistant.subAgentRefs = []
+      if (!assistant.subAgentRefs.find((r) => r.id === p.id)) {
+        assistant.subAgentRefs.push({ id: p.id, title: p.title, status: p.status || 'start' })
+      }
+    },
+    onSubAgentDelta: (p) => {
+      const sub = assistant.subAgents && assistant.subAgents[p.subId]
+      if (!sub) return
+      let msg = sub.messages[sub.messages.length - 1]
+      if (!msg || msg.done) {
+        msg = reactive({ role: 'assistant', content: '', reasoning: '', toolCalls: [], done: false })
+        sub.messages.push(msg)
+      }
+      if (p.delta?.content) msg.content += p.delta.content
+      if (p.delta?.reasoning) msg.reasoning += p.delta.reasoning
+    },
+    onSubAgentTool: (p) => {
+      const sub = assistant.subAgents && assistant.subAgents[p.subId]
+      if (!sub) return
+      let msg = sub.messages[sub.messages.length - 1]
+      if (!msg || msg.done) {
+        msg = reactive({ role: 'assistant', content: '', reasoning: '', toolCalls: [], done: false })
+        sub.messages.push(msg)
+      }
+      if (p.status === 'start') {
+        msg.toolCalls.push(reactive({ id: p.id, name: p.name, args: p.args || {}, status: 'running', result: '' }))
+      } else {
+        const t = msg.toolCalls.find((x) => x.id === p.id) || msg.toolCalls[msg.toolCalls.length - 1]
+        if (t) { t.status = p.status; t.result = p.result || '' }
+      }
+    },
+    onSubAgentEnd: (p) => {
+      const sub = assistant.subAgents && assistant.subAgents[p.id]
+      if (!sub) return
+      sub.status = p.status
+      sub.summary = p.summary || ''
+      const msg = sub.messages[sub.messages.length - 1]
+      if (msg) msg.done = true
+      const ref = assistant.subAgentRefs?.find((r) => r.id === p.id)
+      if (ref) ref.status = p.status
+    },
     onDone: async (meta) => {
       loading.value = false
       assistant.reasoningDone = true
@@ -418,6 +524,7 @@ async function runAssistantTurn(session, options = {}) {
       if (!session.title || session.title === '新对话') {
         session.title = (text || session.messages.find((m) => m.role === 'user')?.content || '').slice(0, 30) || '新对话'
       }
+      planConfirmAssistant.value = null
       await updateSession(session.id, { title: session.title, messages: session.messages })
     },
     onError: (msg) => {
@@ -434,6 +541,7 @@ async function runAssistantTurn(session, options = {}) {
         status: 'error',
       }
       loading.value = false
+      planConfirmAssistant.value = null
     },
     // #11 SSE 断流自动重连：UI 提示 + 本地缓冲重置
     onReconnecting: (attempt, delay, max) => {
@@ -654,7 +762,45 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
           <span class="reconnect-bar__dot" />
           连接中断，正在重连（第 {{ reconnectInfo.attempt }} / {{ reconnectInfo.max }} 次）…
         </div>
-        <MessageList ref="msgListRef" :messages="currentMessages" :active="active" :error="error" :project-id="activeProjectId.id || ''" @rollback="rollbackTo" @regenerate="regenerate" @retryTool="onRetryTool" />
+        <!-- 计划确认卡片：计划产出后弹窗，可勾选跳过部分子任务 -->
+        <transition name="fade">
+          <div v-if="planConfirm" class="plan-confirm-mask" @click.self="cancelPlan">
+            <div class="plan-confirm" role="dialog" aria-modal="true" aria-labelledby="plan-confirm-title">
+              <div class="plan-confirm__header">
+                <div id="plan-confirm-title" class="plan-confirm__title">执行计划</div>
+                <button class="plan-confirm__close" aria-label="关闭" @click="cancelPlan">×</button>
+              </div>
+              <div class="plan-confirm__desc">以下子任务将按顺序执行，取消勾选可跳过：</div>
+              <div class="plan-confirm__items">
+                <label v-for="it in planConfirm" :key="it.id" class="plan-confirm__item">
+                  <input v-model="it.enabled" type="checkbox" />
+                  <span class="plan-confirm__item-body">
+                    <span class="plan-confirm__item-title">{{ it.title }}</span>
+                    <span class="plan-confirm__item-desc">{{ it.description }}</span>
+                  </span>
+                </label>
+              </div>
+              <div class="plan-confirm__footer">
+                <button class="plan-confirm__cancel" @click="cancelPlan">取消</button>
+                <button class="plan-confirm__start" @click="confirmPlan">开始执行</button>
+              </div>
+            </div>
+          </div>
+        </transition>
+
+        <MessageList
+          v-if="!activeSubView"
+          ref="msgListRef"
+          :messages="currentMessages"
+          :active="active"
+          :error="error"
+          :project-id="activeProjectId.id || ''"
+          @rollback="rollbackTo"
+          @regenerate="regenerate"
+          @retryTool="onRetryTool"
+          @open-subagent="activeSubView = $event"
+        />
+        <SubAgentPanel v-else :sub="activeSubAgent" @back="activeSubView = null" />
         <ComposerInput
           ref="composerRef"
           :active="active"
@@ -903,5 +1049,134 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
 @keyframes reconnect-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
+}
+
+/* 计划确认卡片（计划产出后居中弹窗） */
+.plan-confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+}
+.plan-confirm {
+  width: min(560px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+.plan-confirm__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px 8px;
+}
+.plan-confirm__title {
+  font-size: 16px;
+  font-weight: 600;
+}
+.plan-confirm__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.plan-confirm__close:hover {
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+}
+.plan-confirm__desc {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  padding: 0 22px;
+  margin-bottom: 14px;
+}
+.plan-confirm__items {
+  flex: 1;
+  overflow: auto;
+  padding: 0 22px;
+}
+.plan-confirm__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.plan-confirm__item input {
+  margin-top: 3px;
+}
+.plan-confirm__item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.plan-confirm__item-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+.plan-confirm__item-desc {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+.plan-confirm__footer {
+  display: flex;
+  gap: 10px;
+  padding: 14px 22px 18px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+.plan-confirm__start,
+.plan-confirm__cancel {
+  flex: 1;
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+.plan-confirm__start {
+  border: none;
+  background: var(--brand);
+  color: #fff;
+}
+.plan-confirm__start:hover {
+  filter: brightness(1.06);
+}
+.plan-confirm__cancel {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+}
+.plan-confirm__cancel:hover {
+  filter: brightness(0.95);
+}
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

@@ -13,6 +13,9 @@ import {
   TokenStatsHandler,
   buildEffortHint,
   resolveModelConfig,
+  runPlanAndExecute,
+  resolvePlanConfirm,
+  cancelPlanConfirm,
 } from '../lib/chat.js'
 
 const router = Router()
@@ -78,6 +81,17 @@ router.post('/chat/confirm', (req, res) => {
   const gate = sessionId && gatesBySession.get(sessionId)
   const ok = gate ? gate.resolve(id, decision) : false
   res.json({ ok })
+})
+
+// 计划模式确认：用户在计划卡片上勾选跳过项后点「开始执行」，唤醒 runPlanAndExecute 的挂起
+router.post('/chat/plan-confirm', (req, res) => {
+  const { sessionId, skipped, cancel } = req.body || {}
+  if (cancel) {
+    cancelPlanConfirm(sessionId)
+  } else {
+    resolvePlanConfirm(sessionId, Array.isArray(skipped) ? skipped : [])
+  }
+  res.json({ ok: true })
 })
 
 // 按 sessionId 维护当前进行中的 AbortController（停止生成用）
@@ -171,7 +185,7 @@ router.post('/chat', async (req, res) => {
     return
   }
 
-  const { messages, projectId, permission, effort, tools, skills, mcpServers, sessionId } = req.body
+  const { messages, projectId, permission, effort, tools, skills, mcpServers, sessionId, planMode } = req.body
   // 权限级别：read-only(只读) / full(完全访问) / ask(需确认) / none(不允许)；默认 full
   let perm = 'full'
   if (permission === 'read-only' || permission === 'none') perm = permission
@@ -233,25 +247,48 @@ router.post('/chat', async (req, res) => {
     // 有项目：文件工具受项目根目录安全边界约束，按权限提供；
     // 无项目：文件工具以用户主目录为边界，读文件默认可用（写/命令仍受 perm 约束）；
     // 两种场景统一复用 runAgent，仅 root/perm/enabledTools 三处参数不同。
-    await runAgent(
-      chatModel,
-      (messages || []).map(toLangchainMessage),
-      projectRoot,
-      res,
-      effectivePerm,
-      callbacks,
-      {
-        fileRoot,
-        enabledTools: Array.isArray(tools) ? tools : [],
-        skillPrompts,
-        mcpTools,
-        mcpServers,
-        effortHint,
-        confirmGate: perm === 'ask' ? confirmGate : null,
-        abortSignal: abortController ? abortController.signal : null,
-        sessionId: sessionId || null,
-      }
-    )
+    // 计划模式：走 plan→execute 编排；否则普通单 Agent 对话
+    if (planMode) {
+      await runPlanAndExecute(
+        chatModel,
+        (messages || []).map(toLangchainMessage),
+        projectRoot,
+        res,
+        effectivePerm,
+        callbacks,
+        {
+          fileRoot,
+          enabledTools: Array.isArray(tools) ? tools : [],
+          skillPrompts,
+          mcpTools,
+          mcpServers,
+          effortHint,
+          confirmGate: perm === 'ask' ? confirmGate : null,
+          abortSignal: abortController ? abortController.signal : null,
+          sessionId: sessionId || null,
+        }
+      )
+    } else {
+      await runAgent(
+        chatModel,
+        (messages || []).map(toLangchainMessage),
+        projectRoot,
+        res,
+        effectivePerm,
+        callbacks,
+        {
+          fileRoot,
+          enabledTools: Array.isArray(tools) ? tools : [],
+          skillPrompts,
+          mcpTools,
+          mcpServers,
+          effortHint,
+          confirmGate: perm === 'ask' ? confirmGate : null,
+          abortSignal: abortController ? abortController.signal : null,
+          sessionId: sessionId || null,
+        }
+      )
+    }
     writeMeta('ok')
     res.write('data: [DONE]\n\n')
     res.end()

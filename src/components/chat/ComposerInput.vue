@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from "vue";
-import { Plus, ArrowUp, Shield, Zap, AtSign, Hash, FolderOpen, Square } from "lucide-vue-next";
+import { Plus, ArrowUp, Shield, Zap, AtSign, Hash, FolderOpen, Square, ListTree } from "lucide-vue-next";
 import { settings, saveModels } from "../../settings.js";
 import { activeProjectId } from "../../projects.js";
 import { fetchFileTools } from "../../api/agent.js";
@@ -292,6 +292,7 @@ function triggerSend() {
     sessionToolCmds: [...sessionToolCmds.value],
     selectedSkills: [...selectedSkills.value],
     selectedMcp: [...selectedMcp.value],
+    planMode: settings.planMode || false,
   });
 }
 
@@ -357,7 +358,7 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
         class="chat__input-composer"
         ref="composerEl"
         contenteditable="true"
-        data-placeholder="输入消息，@ 引用文件/目录，/ 选择工具…（Enter 发送，Shift+Enter 换行）"
+        :data-placeholder="settings.planMode ? '计划模式：描述你的任务，AI 会先拆解成子任务，再逐个执行…' : '输入消息，@ 引用文件/目录，/ 选择工具…（Enter 发送，Shift+Enter 换行）'"
         @input="onCmdInput"
         @keydown="onCmdKeydown"
         @paste="onPaste"
@@ -374,6 +375,16 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
             </button>
           </div>
           <div class="chat__controls">
+            <button
+              type="button"
+              class="chat__control chat__control--plan"
+              :class="{ 'chat__control--active': settings.planMode }"
+              :title="settings.planMode ? '计划模式：已开启（将先拆解任务再执行）' : '计划模式：关闭'"
+              @click="settings.planMode = !settings.planMode"
+            >
+              <ListTree :size="14" class="chat__control-icon" />
+              <span>计划</span>
+            </button>
             <div class="chat__control" title="权限">
               <Shield :size="14" class="chat__control-icon" />
               <a-select
@@ -595,6 +606,23 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
 .chat__control-icon {
   flex-shrink: 0;
   color: @color-text-muted;
+}
+/* 计划模式开关：开启态用主色高亮，与已选技能 chip 主色一致 */
+.chat__control--plan {
+  padding: 2px 10px 2px 8px;
+  border-color: @color-border;
+}
+.chat__control--plan .chat__control-icon {
+  width: 14px;
+  height: 14px;
+}
+.chat__control--plan.chat__control--active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.chat__control--plan.chat__control--active .chat__control-icon {
+  color: #fff;
 }
 .chat__control--model {
   max-width: 320px;

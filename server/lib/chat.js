@@ -1,5 +1,6 @@
 import os from 'os'
 import { ChatOpenAI } from '@langchain/openai'
+import { tool } from '@langchain/core/tools'
 import {
   HumanMessage,
   SystemMessage,
@@ -194,8 +195,8 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
 
 // 组装工具（文件工具受项目目录安全边界约束 + MCP 工具），并绑定到模型
 // 没有工具时返回原模型，避免 bindTools([]) 行为异常
-function buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools, mcpServers = {}) {
-  const tools = [...buildTools(projectRoot, permission, enabledTools, mcpServers), ...mcpTools]
+function buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools, mcpServers = {}, extraTools = []) {
+  const tools = [...extraTools, ...buildTools(projectRoot, permission, enabledTools, mcpServers), ...mcpTools]
   const toolMap = Object.fromEntries(tools.map((t) => [t.name, t]))
   const modelWithTools = tools.length ? model.bindTools(tools) : model
   return { modelWithTools, toolMap }
@@ -213,7 +214,7 @@ function buildSystemMessages(history, skillPrompts, effortHint = '', ctx = {}) {
 // 流式消费模型一轮输出：增量转发 reasoning/正文，并拼接工具调用分片
 // 返回 { aiContent, toolCalls }（toolCalls 已解析 args JSON）
 // abortSignal：传给 langchain 的 stream，收到中止时底层会抛 AbortError 立即结束本轮
-async function streamModelTurn(modelWithTools, messages, res, callbacks, abortSignal = null) {
+async function streamModelTurn(modelWithTools, messages, res, callbacks, abortSignal = null, subId = null) {
   let aiContent = ''
   const callBuffers = {} // 工具调用索引 -> { name, args, id }（流式分片需拼接）
 
@@ -225,12 +226,18 @@ async function streamModelTurn(modelWithTools, messages, res, callbacks, abortSi
   for await (const chunk of stream) {
     // 思考链（reasoning）增量
     const reasoning = chunk.additional_kwargs?.reasoning_content
-    if (reasoning) res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning } }] })}\n\n`)
+    if (reasoning) {
+      if (subId === false) { /* 静默模式：不写 SSE */ }
+      else if (typeof subId === 'string') res.write(`data: ${JSON.stringify({ type: 'subagent_delta', subId, delta: { reasoning } })}\n\n`)
+      else res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning } }] })}\n\n`)
+    }
 
     // 正文增量
     if (chunk.content) {
       aiContent += chunk.content
-      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk.content } }] })}\n\n`)
+      if (subId === false) { /* 静默模式：不写 SSE */ }
+      else if (typeof subId === 'string') res.write(`data: ${JSON.stringify({ type: 'subagent_delta', subId, delta: { content: chunk.content } })}\n\n`)
+      else res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk.content } }] })}\n\n`)
     }
 
     // 工具调用增量：把同一 index 的 name/args/id 分片拼起来
@@ -256,22 +263,25 @@ async function streamModelTurn(modelWithTools, messages, res, callbacks, abortSi
 // toolRoot：文件工具安全边界（项目根/主目录），由调用方传入（不再依赖闭包）
 // options.confirmGate：ask 模式下的确认闸门（非 ask 模式不传，直接执行）
 // options.abortSignal：停止生成信号；执行前/执行中中止则中断
-async function executeToolCall(call, toolMap, res, { toolRoot, permission = 'full', confirmGate = null, abortSignal = null, sessionId = null } = {}) {
+async function executeToolCall(call, toolMap, res, { toolRoot, permission = 'full', confirmGate = null, abortSignal = null, sessionId = null, subId = null } = {}) {
+  // 子 Agent 的工具调用事件使用独立类型（带 subId）与主 Agent 区分；subId===false 表示静默（不写 SSE）
+  const evType = subId === false ? null : (subId ? 'subagent_tool' : 'tool_call')
   const tool = toolMap[call.name]
+  const writeEv = (obj) => { if (evType) res.write(`data: ${JSON.stringify({ type: evType, subId, ...obj })}\n\n`) }
 
   // 执行前检查停止
   if (abortSignal?.aborted) {
     const msg = '已停止生成（用户中断）。'
-    res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'canceled', result: msg })}\n\n`)
+    writeEv({ id: call.id, name: call.name, status: 'canceled', result: msg })
     return msg
   }
 
-  res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, args: call.args, status: 'start' })}\n\n`)
+  writeEv({ id: call.id, name: call.name, args: call.args, status: 'start' })
 
   // 危险命令强制拦截（即便用户/模型允许也拒绝），与 executeCommand 内部规则保持一致
   if (call.name === 'executeCommand' && isDangerousCommand(call.args && call.args.command)) {
     const denied = '已拒绝执行：检测到破坏性/高风险命令（' + (call.args.command || '') + '），系统已强制拦截。请改用更安全的操作。'
-    res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'denied', result: denied })}\n\n`)
+    writeEv({ id: call.id, name: call.name, status: 'denied', result: denied })
     return denied
   }
 
@@ -283,13 +293,13 @@ async function executeToolCall(call, toolMap, res, { toolRoot, permission = 'ful
     const decision = await confirmGate.ask(call.id, call.name, call.args, preview)
     if (decision === 'deny') {
       const denied = '用户拒绝了该工具调用（' + call.name + '）。请向用户说明，并改用其他安全方案或停止该操作。'
-      res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'denied', result: denied })}\n\n`)
+      writeEv({ id: call.id, name: call.name, status: 'denied', result: denied })
       return denied
     }
     // 确认等待过程中用户可能又点了停止
     if (abortSignal?.aborted) {
       const msg = '已停止生成（用户中断）。'
-      res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'canceled', result: msg })}\n\n`)
+      writeEv({ id: call.id, name: call.name, status: 'canceled', result: msg })
       return msg
     }
   }
@@ -309,7 +319,7 @@ async function executeToolCall(call, toolMap, res, { toolRoot, permission = 'ful
     }
   }
 
-  res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'end', result: String(result) })}\n\n`)
+  writeEv({ id: call.id, name: call.name, status: 'end', result: String(result) })
   return String(result)
 }
 
@@ -430,4 +440,231 @@ export class TokenStatsHandler extends BaseCallbackHandler {
     this.usageRef.promptTokens += u.prompt_tokens || u.promptTokens || 0
     this.usageRef.completionTokens += u.completion_tokens || u.completionTokens || 0
   }
+}
+
+// ===================== 多 Agent 编排：计划 → 执行（plan→execute） =====================
+
+// 计划模式下主 Agent 专用工具：提交结构化子任务清单（由 runPlanPhase 通过 extraTools 注入）
+const planTasksTool = tool(
+  async () => '计划已提交，系统将逐个分派子 Agent 执行。',
+  {
+    name: 'planTasks',
+    description:
+      '将复杂任务拆解为有序、可执行、彼此相对独立的子任务清单并提交。仅在计划模式下调用一次。提交后系统自动进入执行阶段，无需你自行执行。',
+    schema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          description: '有序的子任务列表',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: '子任务简短标题' },
+              description: { type: 'string', description: '子任务具体说明与目标' },
+            },
+            required: ['title'],
+          },
+        },
+      },
+      required: ['items'],
+    },
+  }
+)
+
+// 规划者系统提示：只拆解、不执行
+function buildPlanSystemPrompt(permission, projectRoot) {
+  return (
+    buildSystemPrompt({ permission, projectRoot }) +
+    '\n\n你当前处于「计划模式」。请先理解用户需求，将其拆解为若干有序、可执行、彼此相对独立的子任务，然后调用 planTasks 工具提交这份计划（仅需调用一次）。' +
+    '在计划模式下不要直接执行任务或修改文件，只产出高质量拆解。每个子任务包含清晰标题与说明；若任务简单无需拆解，可只提交 1 个子任务。'
+  )
+}
+
+// 子 Agent（执行者）系统提示：专注单一子任务
+function buildSubAgentSystemPrompt(task, permission, projectRoot) {
+  return (
+    buildSystemPrompt({ permission, projectRoot }) +
+    '\n\n你是一个「子任务执行者」Agent，只负责完成分配给你的单一子任务。请使用工具实际执行（读取、修改文件或运行命令），完成后用简短文字说明你做了什么、产出了什么。' +
+    '不要重新规划整体任务，专注当前子任务本身。'
+  )
+}
+
+// 归一化计划项，保证返回 [{id,title,description}]
+function normalizePlan(items) {
+  if (!Array.isArray(items)) return []
+  return items
+    .map((it, i) => ({
+      id: 'plan-' + i,
+      title: String((it && it.title) || '子任务 ' + (i + 1)),
+      description: String((it && it.description) || ''),
+    }))
+    .filter((it) => it.title)
+}
+
+// 计划阶段：让主 Agent 拆解并提交 planTasks（静默主消息，subId=false）
+async function runPlanPhase(model, history, projectRoot, res, permission, callbacks, opts) {
+  const toolRoot = opts.fileRoot || projectRoot || os.homedir()
+  const { modelWithTools, toolMap } = buildModelWithTools(
+    model, toolRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers, [planTasksTool]
+  )
+  const sysText = buildPlanSystemPrompt(permission, projectRoot)
+  const messages = [new SystemMessage(sysText), ...history]
+  const MAX_TURNS = 6
+  let plan = null
+  // 计划阶段静默：SSE 抑制已由调用的 subId=false 实现（streamModelTurn/executeToolCall 内部据此不写 SSE），
+  // 此处直接复用 LangChain 回调数组即可，切勿展开成对象（会导致 CallbackManager 遍历非数组而抛错）。
+  const silent = callbacks
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    if (opts.abortSignal?.aborted) break
+    const { aiContent, toolCalls } = await streamModelTurn(modelWithTools, messages, res, silent, opts.abortSignal, false)
+    messages.push(new AIMessage({ content: aiContent, tool_calls: toolCalls }))
+    if (!toolCalls.length) { plan = null; break } // 未拆解，直接作答 -> 退回普通对话
+    let stop = false
+    for (const call of toolCalls) {
+      if (opts.abortSignal?.aborted) break
+      if (call.name === 'planTasks') {
+        plan = normalizePlan(call.args && call.args.items)
+        stop = true
+        break
+      }
+      const r = await executeToolCall(call, toolMap, res, {
+        toolRoot, permission, confirmGate: opts.confirmGate, abortSignal: opts.abortSignal, sessionId: opts.sessionId, subId: false,
+      })
+      messages.push(new ToolMessage({ content: r, tool_call_id: call.id }))
+    }
+    if (stop) break
+    if (opts.abortSignal?.aborted) break
+  }
+  return plan
+}
+
+// 单个子 Agent 执行：独立 Agent 循环，事件带 subId 供前端区分主/子
+async function runSubAgent({ model, history, projectRoot, res, permission, callbacks, opts, task, subId, abortSignal }) {
+  const toolRoot = opts.fileRoot || projectRoot || os.homedir()
+  const { modelWithTools, toolMap } = buildModelWithTools(model, toolRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers)
+  const sysText = buildSubAgentSystemPrompt(task, permission, projectRoot)
+  const messages = [
+    new SystemMessage(sysText),
+    ...history,
+    new HumanMessage(`子任务：\n标题：${task.title}\n说明：${task.description || '(无)'}\n\n请专注完成这个子任务，使用工具实际执行，并给出简短结果。`),
+  ]
+  const MAX_TURNS = 12
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    if (abortSignal?.aborted) break
+    const { aiContent, toolCalls } = await streamModelTurn(modelWithTools, messages, res, callbacks, abortSignal, subId)
+    messages.push(new AIMessage({ content: aiContent, tool_calls: toolCalls }))
+    if (!toolCalls.length) break
+    for (const call of toolCalls) {
+      if (abortSignal?.aborted) break
+      const r = await executeToolCall(call, toolMap, res, {
+        toolRoot, permission, confirmGate: opts.confirmGate, abortSignal, sessionId: opts.sessionId, subId,
+      })
+      messages.push(new ToolMessage({ content: r, tool_call_id: call.id }))
+    }
+    if (abortSignal?.aborted) break
+  }
+  const lastAI = [...messages].reverse().find((m) => m._getType && m._getType() === 'ai')
+  return lastAI && typeof lastAI.content === 'string' ? lastAI.content.trim() : ''
+}
+
+// 纯文本回复（规划失败回退 / 最终汇总），只输出正文
+async function runSimpleReply(modelWithTools, toolMap, messages, res, callbacks, opts) {
+  const MAX_TURNS = 2
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    if (opts.abortSignal?.aborted) break
+    const { aiContent, toolCalls } = await streamModelTurn(modelWithTools, messages, res, callbacks, opts.abortSignal, null)
+    messages.push(new AIMessage({ content: aiContent, tool_calls: toolCalls }))
+    if (!toolCalls.length) break
+    for (const call of toolCalls) {
+      if (opts.abortSignal?.aborted) break
+      const r = await executeToolCall(call, toolMap, res, {
+        toolRoot: opts.fileRoot || os.homedir(), permission: opts.permission, confirmGate: opts.confirmGate, abortSignal: opts.abortSignal, sessionId: opts.sessionId,
+      })
+      messages.push(new ToolMessage({ content: r, tool_call_id: call.id }))
+    }
+  }
+}
+
+// 计划确认闸门：Plan 完成后挂起等待前端确认（含跳过列表），由 /api/chat/plan-confirm 唤醒
+const pendingPlanConfirms = new Map()
+export function resolvePlanConfirm(sessionId, skipped = []) {
+  const entry = pendingPlanConfirms.get(sessionId)
+  if (entry) { entry.resolve(skipped); pendingPlanConfirms.delete(sessionId) }
+}
+export function cancelPlanConfirm(sessionId) {
+  const entry = pendingPlanConfirms.get(sessionId)
+  if (entry) { entry.reject(new Error('plan-canceled')); pendingPlanConfirms.delete(sessionId) }
+}
+
+// 顶层编排：plan→execute→summarize（串行执行子 Agent）
+export async function runPlanAndExecute(model, history, projectRoot, res, permission = 'full', callbacks, opts = {}) {
+  const { abortSignal = null, sessionId = null } = opts
+
+  // ===== Phase 1: Plan =====
+  res.write(`data: ${JSON.stringify({ type: 'phase', phase: 'plan', status: 'start' })}\n\n`)
+  const plan = await runPlanPhase(model, history, projectRoot, res, permission, callbacks, opts)
+  if (!plan || !plan.length) {
+    // 未产出计划：回退为普通对话（直接回答）
+    res.write(`data: ${JSON.stringify({ type: 'phase', phase: 'plan', status: 'failed' })}\n\n`)
+    const { modelWithTools, toolMap } = buildModelWithTools(model, opts.fileRoot || projectRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers)
+    const messages = buildSystemMessages(history, opts.skillPrompts || [], opts.effortHint || '', { permission, projectRoot })
+    await runSimpleReply(modelWithTools, toolMap, messages, res, callbacks, { ...opts, permission })
+    return
+  }
+
+  // 等待用户确认计划（可勾选跳过部分子任务）
+  res.write(`data: ${JSON.stringify({ type: 'plan', items: plan, status: 'await_confirm' })}\n\n`)
+  let skipped = []
+  try {
+    skipped = await new Promise((resolve, reject) => {
+      pendingPlanConfirms.set(sessionId, { resolve, reject })
+      // 超时保护：10 分钟未确认则按全部执行
+      setTimeout(() => {
+        if (pendingPlanConfirms.has(sessionId)) {
+          pendingPlanConfirms.delete(sessionId)
+          resolve([])
+        }
+      }, 10 * 60 * 1000)
+    })
+  } catch (e) {
+    // 用户取消：发送取消事件并结束整个编排，不再执行
+    if (e?.message === 'plan-canceled') {
+      res.write(`data: ${JSON.stringify({ type: 'phase', phase: 'execute', status: 'canceled' })}\n\n`)
+      return
+    }
+    // 其他异常降级为全部执行（与旧行为一致）
+    skipped = []
+  }
+
+  // ===== Phase 2: Execute（串行） =====
+  res.write(`data: ${JSON.stringify({ type: 'phase', phase: 'execute', status: 'start' })}\n\n`)
+  const summaries = []
+  for (let i = 0; i < plan.length; i++) {
+    if (abortSignal?.aborted) break
+    const task = plan[i]
+    if (skipped.includes(task.id)) {
+      res.write(`data: ${JSON.stringify({ type: 'subagent_start', id: task.id, index: i, title: task.title, description: task.description, status: 'skipped' })}\n\n`)
+      res.write(`data: ${JSON.stringify({ type: 'subagent_end', id: task.id, index: i, status: 'skipped', summary: '(已跳过)' })}\n\n`)
+      continue
+    }
+    const subId = `sub-${sessionId || 's'}-${i}-${Date.now()}`
+    res.write(`data: ${JSON.stringify({ type: 'subagent_start', id: subId, index: i, title: task.title, description: task.description, status: 'start' })}\n\n`)
+    const summary = await runSubAgent({ model, history, projectRoot, res, permission, callbacks, opts, task, subId, abortSignal })
+    res.write(`data: ${JSON.stringify({ type: 'subagent_end', id: subId, index: i, status: 'end', summary: summary || '(无摘要)' })}\n\n`)
+    summaries.push({ title: task.title, summary })
+    if (abortSignal?.aborted) break
+  }
+
+  // ===== Phase 3: Summarize =====
+  if (!abortSignal?.aborted && summaries.length) {
+    res.write(`data: ${JSON.stringify({ type: 'phase', phase: 'summarize', status: 'start' })}\n\n`)
+    const summaryText = summaries.map((s, i) => `### 子任务 ${i + 1}：${s.title}\n${s.summary}`).join('\n\n')
+    const sysText = buildSystemPrompt({ permission: 'full', projectRoot: '' }) +
+      '\n\n你正在对刚刚由多个子 Agent 协作完成的任务做最终汇总。请基于各子任务的执行结果，向用户给出清晰、简洁的整体结论、关键产出与后续建议。'
+    const messages = [new SystemMessage(sysText), ...history, new HumanMessage(`以下是各子任务的执行结果，请据此给出整体总结与结论：\n\n${summaryText}`)]
+    const { modelWithTools, toolMap } = buildModelWithTools(model, opts.fileRoot || projectRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers)
+    await runSimpleReply(modelWithTools, toolMap, messages, res, callbacks, { ...opts, permission })
+  }
+  res.write(`data: ${JSON.stringify({ type: 'phase', phase: 'done', status: 'end' })}\n\n`)
 }

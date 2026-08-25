@@ -130,6 +130,7 @@ export const settings = reactive({
   mcpServers: {},
   disabledMcpServers: [],
   enabledSkills: [],
+  planMode: false, // 计划模式开关：ComposerInput 左侧「计划」按钮，开启后走 plan→execute 编排
 })
 
 // 仅 MCP 相关字段
@@ -257,6 +258,8 @@ async function initOthers() {
     if (!res.ok) return
     const data = await res.json()
     settings.enabledSkills = Array.isArray(data.enabledSkills) ? data.enabledSkills : []
+    // 计划模式开关：缺省为关闭；仅当显式为布尔值时采用，避免脏数据
+    settings.planMode = typeof data.planMode === 'boolean' ? data.planMode : false
   } catch (e) {
     console.error('加载其余配置失败，使用默认值:', e)
   }
@@ -307,7 +310,7 @@ async function saveOthers() {
     await fetch('/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabledSkills: settings.enabledSkills }),
+      body: JSON.stringify({ enabledSkills: settings.enabledSkills, planMode: !!settings.planMode }),
     })
   } catch (e) {
     console.error('保存其余配置失败:', e)
@@ -324,6 +327,7 @@ export async function resetSettings() {
     mcpServers: {},
     disabledMcpServers: [],
     enabledSkills: [],
+    planMode: false,
   })
   // 双保险：剔除仍在 configuredVendors 里但 API Key 为空的供应商（默认壳不应算"已配置"）
   settings.configuredVendors = settings.configuredVendors.filter((k) => {

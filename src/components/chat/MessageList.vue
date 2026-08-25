@@ -3,7 +3,7 @@ import { ref, reactive, computed, nextTick, watch, onMounted } from 'vue'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
-import { ChevronDown, ChevronUp, Check, Loader2, Copy, ArrowDown, Undo2, Redo2, Timer, User } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Check, Loader2, Copy, ArrowDown, Undo2, Redo2, Timer, User, ListTree } from 'lucide-vue-next'
 
 marked.setOptions({
   highlight(code, lang) {
@@ -19,9 +19,10 @@ const props = defineProps({
   active: { type: Object, default: null },
   error: { type: String, default: '' },
   projectId: { type: String, default: '' },
+  readonly: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['rollback', 'regenerate', 'restore', 'retryTool'])
+const emit = defineEmits(['rollback', 'regenerate', 'restore', 'retryTool', 'open-subagent'])
 
 // 对话级回退：删除该消息及其之后 / 重新生成
 function onEdit(m) {
@@ -224,6 +225,22 @@ defineExpose({ clearRetrying })
             <div
               class="bubble__content"
             >
+              <!-- 计划模式：拆解后的子任务清单 -->
+              <div v-if="m.plan && m.plan.length" class="plan-card">
+                <div class="plan-card__title">
+                  <ListTree :size="14" />
+                  <span>执行计划（{{ m.plan.length }} 个子任务）</span>
+                </div>
+                <ol class="plan-card__list">
+                  <li v-for="(it, pi) in m.plan" :key="it.id" class="plan-card__item">
+                    <span class="plan-card__idx">{{ pi + 1 }}</span>
+                    <span class="plan-card__text">
+                      <span class="plan-card__name">{{ it.title }}</span>
+                      <span v-if="it.description" class="plan-card__desc">{{ it.description }}</span>
+                    </span>
+                  </li>
+                </ol>
+              </div>
               <div
                 v-if="m.role === 'assistant' && (m.showThinking || !m.done || m.reasoning || (m.toolCalls || []).length)"
                 class="thinking thinking--nested"
@@ -297,12 +314,27 @@ defineExpose({ clearRetrying })
               </div>
 
               <div class="bubble__markdown" v-html="renderMarkdown(m.content)"></div>
+              <!-- 子任务入口：点击钻取到子 Agent 面板 -->
+              <div v-if="m.subAgentRefs && m.subAgentRefs.length" class="subagent-refs">
+                <button
+                  v-for="ref in m.subAgentRefs"
+                  :key="ref.id"
+                  type="button"
+                  class="subagent-ref"
+                  :class="'subagent-ref--' + (ref.status || 'start')"
+                  @click="emit('open-subagent', ref.id)"
+                >
+                  <ListTree :size="13" />
+                  <span class="subagent-ref__title">{{ ref.title }}</span>
+                  <span class="subagent-ref__status">{{ ref.status === 'end' ? '✓' : (ref.status === 'skipped' ? '已跳过' : '执行中') }}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- 操作条：放在气泡外部，贴近气泡边缘显示，不占用正文空间 -->
-        <div v-if="m.role === 'user'" class="msg__actions msg__actions--user">
+        <div v-if="!readonly && m.role === 'user'" class="msg__actions msg__actions--user">
           <button
             class="msg__action"
             type="button"
@@ -313,7 +345,7 @@ defineExpose({ clearRetrying })
             <Undo2 :size="14" />
           </button>
         </div>
-        <div v-else class="msg__actions msg__actions--ai">
+        <div v-else-if="!readonly" class="msg__actions msg__actions--ai">
           <button
             class="msg__action"
             type="button"
@@ -938,5 +970,106 @@ defineExpose({ clearRetrying })
   .thinking {
     animation: none !important;
   }
+}
+/* 计划模式：拆解后的子任务清单卡片 */
+.plan-card {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: var(--color-bg-subtle);
+}
+.plan-card__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.plan-card__list {
+  margin: 0;
+  padding-left: 4px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.plan-card__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.plan-card__idx {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.plan-card__text {
+  display: flex;
+  flex-direction: column;
+}
+.plan-card__name {
+  font-size: 13px;
+  font-weight: 500;
+}
+.plan-card__desc {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+/* 子任务入口：可钻取到子 Agent 面板 */
+.subagent-refs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.subagent-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 7px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+.subagent-ref:hover {
+  background: var(--color-bg-subtle);
+  border-color: var(--brand);
+}
+.subagent-ref__title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subagent-ref__status {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.subagent-ref--end .subagent-ref__status {
+  color: #16a34a;
+}
+.subagent-ref--skipped .subagent-ref__status {
+  color: var(--color-text-muted);
+}
+.subagent-ref--start .subagent-ref__status {
+  color: var(--brand);
 }
 </style>
