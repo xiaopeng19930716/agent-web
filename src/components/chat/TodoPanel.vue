@@ -6,6 +6,7 @@ import { updateSession } from '../../sessions.js'
 const props = defineProps({
   session: { type: Object, default: null },
 })
+const emit = defineEmits(['close'])
 
 // 任务清单（来自后端 todoWrite 写入的 session.todos）
 const todos = computed(() => (props.session && Array.isArray(props.session.todos) ? props.session.todos : []))
@@ -41,6 +42,9 @@ const STATUS_LABEL = {
     <div class="todo__head">
       <span class="todo__title"><ListTodo :size="14" /> 任务清单</span>
       <span class="todo__progress">{{ doneCount }}/{{ total }} · {{ progress }}%</span>
+      <button class="todo__close" type="button" title="收起任务清单" @click="emit('close')">
+        <X :size="14" />
+      </button>
     </div>
     <div v-if="total === 0" class="todo__empty">模型尚未创建任务清单。复杂任务中它会自动列出计划并逐步勾选。</div>
     <ul v-else class="todo__list">
@@ -68,22 +72,38 @@ const STATUS_LABEL = {
 
 <style scoped>
 .todo {
-  width: 100%;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--color-border, #e5e7eb);
-  background: var(--color-bg, #fff);
   min-height: 0;
+  height: 100%;
 }
 .todo__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--color-border, #e5e7eb);
   font-size: 13px;
   font-weight: 600;
   color: #374151;
+}
+.todo__close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #9ca3af;
+  cursor: pointer;
+}
+.todo__close:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #4b5563;
 }
 .todo__title {
   display: inline-flex;

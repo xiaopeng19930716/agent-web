@@ -40,6 +40,13 @@ function onRetryTool(m, t, i, ti) {
   emit('retryTool', { msg: m, tool: t, key: k })
 }
 
+// 工具调用是否失败：结果文本包含错误/拒绝/失败等关键字
+function isToolFailed(t) {
+  const r = String(t.result || '')
+  return /^(工具执行错误|错误|拒绝|失败|error|fail|deny|rejected|timeout)/i.test(r) ||
+    /(错误|失败|拒绝|error|failed|denied|timeout)/i.test(r)
+}
+
 const scrollEl = ref(null)
 
 // 是否显示「回到底部」悬浮按钮：仅当用户已上滚离开底部时显示
@@ -257,8 +264,21 @@ defineExpose({ clearRetrying })
                         <div class="timeline__head">
                           <span class="timeline__icon">⚙</span>
                           <span class="timeline__name">调用 {{ t.name }}</span>
-                          <span class="timeline__status" :class="{ 'timeline__status--done': t.status === 'done' }">
-                            {{ t.status === 'done' ? '完成' : '执行中' }}
+                          <button
+                            v-if="t.status === 'done' && isToolFailed(t)"
+                            type="button"
+                            class="timeline__retry"
+                            :class="{ 'timeline__retry--spin': retrying.has(resultKey(i, ti)) }"
+                            :disabled="retrying.has(resultKey(i, ti))"
+                            :title="retrying.has(resultKey(i, ti)) ? '重试中' : '重试工具 ' + t.name"
+                            :aria-label="'重试工具 ' + t.name"
+                            @click="onRetryTool(m, t, i, ti)"
+                          >
+                            <Loader2 v-if="retrying.has(resultKey(i, ti))" :size="12" class="timeline__spin" />
+                            <span v-else>重试</span>
+                          </button>
+                          <span class="timeline__status" :class="{ 'timeline__status--done': t.status === 'done' && !isToolFailed(t), 'timeline__status--failed': t.status === 'done' && isToolFailed(t) }">
+                            {{ t.status !== 'done' ? '执行中' : (isToolFailed(t) ? '失败' : '完成') }}
                           </span>
                         </div>
                         <div v-if="Object.keys(t.args || {}).length" class="timeline__args">
@@ -270,18 +290,6 @@ defineExpose({ clearRetrying })
                           </span>
                           <pre v-show="resultExpanded.has(resultKey(i, ti))" class="timeline__result-body">{{ clip(t.result, 1200) }}</pre>
                         </div>
-                        <button
-                          v-if="t.status === 'done'"
-                          type="button"
-                          class="timeline__retry"
-                          :disabled="retrying.has(resultKey(i, ti))"
-                          :aria-label="'重试工具 ' + t.name"
-                          @click="onRetryTool(m, t, i, ti)"
-                        >
-                          <Loader2 v-if="retrying.has(resultKey(i, ti))" :size="12" class="timeline__spin" />
-                          <Redo2 v-else :size="12" />
-                          <span>{{ retrying.has(resultKey(i, ti)) ? '重试中' : '重试' }}</span>
-                        </button>
                       </div>
                     </li>
                   </ul>
@@ -487,6 +495,10 @@ defineExpose({ clearRetrying })
   font-size: 14px;
   word-break: break-word;
 }
+.bubble__content {
+  min-width: 140px;
+  min-height: 46px;
+}
 .bubble__body {
   position: relative;
   flex: 1;
@@ -667,15 +679,20 @@ defineExpose({ clearRetrying })
 .thinking--nested {
   margin: 0 0 10px;
   padding: 8px 10px;
-  background: var(--color-bg);
-  border: none;
+  background: var(--color-bg-subtle);
+  border: 1px solid @color-border;
   border-left: 3px solid @color-text-muted;
   border-radius: 8px;
   animation: none;
 }
 .thinking--collapsed {
-  background: var(--color-bg);
+  background: var(--color-bg-subtle);
+  border-color: @color-border;
   border-left-color: @color-text-muted;
+}
+/* 思考区与结论正文之间加清晰间距 */
+.thinking + .bubble__markdown {
+  margin-top: 8px;
 }
 .thinking__head {
   display: flex;
@@ -831,6 +848,10 @@ defineExpose({ clearRetrying })
   color: #16a34a;
   background: #dcfce7;
 }
+.timeline__status--failed {
+  color: #d64545;
+  background: #fde8e8;
+}
 .timeline__args {
   margin-top: 3px;
   font-size: 12px;
@@ -861,6 +882,28 @@ defineExpose({ clearRetrying })
   overflow: auto;
   white-space: pre-wrap;
   font-family: 'Fira Code', Consolas, monospace;
+}
+.timeline__retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #d64545;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.timeline__retry:hover:not(:disabled) {
+  background: var(--color-bg-subtle);
+  color: #b33636;
+}
+.timeline__retry:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .chat__error {

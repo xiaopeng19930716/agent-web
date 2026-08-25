@@ -83,20 +83,13 @@ const currentMessages = computed(() => activeSession.value?.messages || [])
 const showLog = ref(false)
 // 是否展示右侧「文件变更」面板（头部「查看变更」按钮切换）
 const showChanges = ref(false)
-// 是否展示右侧「任务清单」面板
+// 是否展示悬浮「任务清单」层（对话中有 todo 数据时自动显示，用户可手动关闭）
 const showTodos = ref(false)
 const showAdd = ref(false)
 const router = useRouter()
 
-// 右侧面板列宽：根据开启的面板数动态计算 grid 列（平滑过渡）
-const gridCols = computed(() => {
-  const changes = showChanges.value ? 1 : 0
-  const todos = showTodos.value ? 1 : 0
-  const panels = changes + todos
-  if (panels === 0) return '1fr 0px'
-  if (panels === 1) return '1fr 32vw'
-  return '1fr 24vw 24vw'
-})
+// 右侧面板列宽：仅文件变更面板（任务清单已改为悬浮层）
+const gridCols = computed(() => (showChanges.value ? '1fr 32vw' : '1fr 0px'))
 
 // 添加项目表单
 const form = ref({ alias: '', path: '' })
@@ -367,6 +360,8 @@ async function runAssistantTurn(session, options = {}) {
       // 后端把任务清单状态推过来，写入当前会话（session 持久化由后端负责）
       const session = sessions.list.find((s) => s.id === sessions.activeSessionId)
       if (session) session.todos = todos || []
+      // 有任务数据时悬浮层自动显示；空清单不自动弹
+      if (Array.isArray(todos) && todos.length) showTodos.value = true
     },
     onReasoning: (text) => {
       // 模型返回新推理时，先清除重做占位（旧 reasoning），避免新旧拼接
@@ -659,17 +654,17 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
           />
         </transition>
       </div>
-
-      <!-- 右侧「任务清单」展示区 -->
-      <div class="chat__todos-wrap">
-        <transition name="changes-fade">
-          <TodoPanel
-            v-if="showTodos"
-            :session="activeSession"
-          />
-        </transition>
-      </div>
     </div>
+
+    <!-- 任务清单悬浮层：ChatHeader 下方、浏览器右上方；有任务时自动显示，用户可关闭 -->
+    <transition name="todo-float">
+      <TodoPanel
+        v-if="showTodos"
+        class="chat__todo-float"
+        :session="activeSession"
+        @close="showTodos = false"
+      />
+    </transition>
 
     <AddProjectModal
       :show="showAdd"
@@ -732,6 +727,7 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
 }
 /* 头部之下的主体：左侧会话区 + 右侧面板，列宽由 gridCols(computed) 控制并平滑过渡 */
 .chat__body {
@@ -750,12 +746,43 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
   min-height: 0;
   height: 100%;
 }
-/* 右侧面板包裹（变更/任务共用）：列宽由 grid 控制，溢出隐藏以便收起 */
-.chat__changes-wrap,
-.chat__todos-wrap {
+/* 右侧「文件变更」面板包裹：列宽由 grid 控制，溢出隐藏以便收起 */
+.chat__changes-wrap {
   overflow: hidden;
   min-width: 0;
   display: flex;
+}
+/* 任务清单悬浮层：固定在 ChatHeader 下方、浏览器右上方 */
+.chat__todo-float {
+  position: absolute;
+  top: 50px;
+  right: 0;
+  width: 300px;
+  max-height: 60vh;
+  z-index: 40;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-right: none;
+  border-radius: 10px 0 0 10px;
+  background: var(--color-bg, #fff);
+  box-shadow: -4px 8px 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* 悬浮层进出场：下滑 + 淡入 */
+.todo-float-enter-active,
+.todo-float-leave-active {
+  transition: transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.26s ease;
+}
+.todo-float-enter-from,
+.todo-float-leave-to {
+  transform: translateX(16px);
+  opacity: 0;
+}
+.todo-float-enter-to,
+.todo-float-leave-from {
+  transform: translateX(0);
+  opacity: 1;
 }
 /* 变更区内部淡入，避免内容瞬间出现 */
 .changes-fade-enter-active,
