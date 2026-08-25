@@ -29,6 +29,7 @@ import ChatLogDrawer from './ChatLogDrawer.vue'
 import ChatHeader from './chat/ChatHeader.vue'
 import MessageList from './chat/MessageList.vue'
 import SessionChanges from './chat/SessionChanges.vue'
+import TodoPanel from './chat/TodoPanel.vue'
 import ComposerInput from './chat/ComposerInput.vue'
 import AddProjectModal from './chat/AddProjectModal.vue'
 import { confirmToolCall, abortChat } from '../api/agent.js'
@@ -82,8 +83,20 @@ const currentMessages = computed(() => activeSession.value?.messages || [])
 const showLog = ref(false)
 // 是否展示右侧「文件变更」面板（头部「查看变更」按钮切换）
 const showChanges = ref(false)
+// 是否展示右侧「任务清单」面板
+const showTodos = ref(false)
 const showAdd = ref(false)
 const router = useRouter()
+
+// 右侧面板列宽：根据开启的面板数动态计算 grid 列（平滑过渡）
+const gridCols = computed(() => {
+  const changes = showChanges.value ? 1 : 0
+  const todos = showTodos.value ? 1 : 0
+  const panels = changes + todos
+  if (panels === 0) return '1fr 0px'
+  if (panels === 1) return '1fr 32vw'
+  return '1fr 24vw 24vw'
+})
 
 // 添加项目表单
 const form = ref({ alias: '', path: '' })
@@ -350,6 +363,11 @@ async function runAssistantTurn(session, options = {}) {
         preview: payload.preview || null, // 文件改动的 before/after 或 previewError
       }
     },
+    onTodoUpdate: (todos) => {
+      // 后端把任务清单状态推过来，写入当前会话（session 持久化由后端负责）
+      const session = sessions.list.find((s) => s.id === sessions.activeSessionId)
+      if (session) session.todos = todos || []
+    },
     onReasoning: (text) => {
       // 模型返回新推理时，先清除重做占位（旧 reasoning），避免新旧拼接
       if (!gotNewReasoning) {
@@ -610,11 +628,13 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
       :active-session="activeSession"
       :project-id="activeProjectId.id || ''"
       :show-changes="showChanges"
+      :show-todos="showTodos"
       @open-log="showLog = true"
       @update:show-changes="showChanges = $event"
+      @update:show-todos="showTodos = $event"
     />
 
-    <div class="chat__body" :class="{ 'chat__body--with-changes': showChanges }">
+    <div class="chat__body" :style="{ gridTemplateColumns: gridCols }">
       <div class="chat__conversation">
         <MessageList ref="msgListRef" :messages="currentMessages" :active="active" :error="error" :project-id="activeProjectId.id || ''" @rollback="rollbackTo" @regenerate="regenerate" @retryTool="onRetryTool" />
         <ComposerInput
@@ -636,6 +656,16 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
             v-if="showChanges"
             :session="activeSession"
             :project-id="activeProjectId.id || ''"
+          />
+        </transition>
+      </div>
+
+      <!-- 右侧「任务清单」展示区 -->
+      <div class="chat__todos-wrap">
+        <transition name="changes-fade">
+          <TodoPanel
+            v-if="showTodos"
+            :session="activeSession"
           />
         </transition>
       </div>
@@ -703,16 +733,14 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
   flex-direction: column;
   height: 100%;
 }
-/* 头部之下的主体：左侧会话区 + 右侧变更面板，grid 列宽平滑过渡 */
+/* 头部之下的主体：左侧会话区 + 右侧面板，列宽由 gridCols(computed) 控制并平滑过渡 */
 .chat__body {
   flex: 1;
   display: grid;
   grid-template-columns: 1fr 0px;
+  grid-template-rows: minmax(0, 1fr);
   transition: grid-template-columns 0.28s cubic-bezier(0.22, 0.61, 0.36, 1);
   min-height: 0;
-}
-.chat__body--with-changes {
-  grid-template-columns: 1fr 32vw;
 }
 /* 会话区本身纵向排布：消息列表在上，输入框在下 */
 .chat__conversation {
@@ -720,9 +748,11 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  height: 100%;
 }
-/* 右侧变更区包裹：列宽由 grid 控制，溢出隐藏以便收起 */
-.chat__changes-wrap {
+/* 右侧面板包裹（变更/任务共用）：列宽由 grid 控制，溢出隐藏以便收起 */
+.chat__changes-wrap,
+.chat__todos-wrap {
   overflow: hidden;
   min-width: 0;
   display: flex;

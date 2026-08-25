@@ -1,14 +1,15 @@
 <script setup>
 import { ref, nextTick, computed } from 'vue'
-import { GitCompare } from 'lucide-vue-next'
+import { GitCompare, ListTodo, MessageSquareText } from 'lucide-vue-next'
 import { updateSession } from '../../sessions.js'
 
 const props = defineProps({
   activeSession: { type: Object, default: null },
   projectId: { type: String, default: '' },
   showChanges: { type: Boolean, default: false },
+  showTodos: { type: Boolean, default: false },
 })
-const emit = defineEmits(['open-log', 'update:show-changes'])
+const emit = defineEmits(['open-log', 'update:show-changes', 'update:show-todos'])
 
 const editingTitle = ref(false)
 const titleDraft = ref('')
@@ -62,19 +63,31 @@ function cancelRename() {
       @dblclick="startRenameTitle"
     >{{ activeSession.title || '新对话' }}</span>
     <a-button
-      class="chat__changes-btn"
+      class="chat__head-btn"
       size="small"
+      title="查看文件变更"
       :type="showChanges ? 'primary' : 'default'"
       @click="emit('update:show-changes', !showChanges)"
     >
       <template #icon><GitCompare :size="14" /></template>
-      查看变更
     </a-button>
     <a-button
-      class="chat__log-btn"
+      class="chat__head-btn"
       size="small"
+      title="任务清单"
+      :type="showTodos ? 'primary' : 'default'"
+      @click="emit('update:show-todos', !showTodos)"
+    >
+      <template #icon><ListTodo :size="14" /></template>
+    </a-button>
+    <a-button
+      class="chat__head-btn"
+      size="small"
+      title="对话日志"
       @click="emit('open-log')"
-    >对话日志</a-button>
+    >
+      <template #icon><MessageSquareText :size="14" /></template>
+    </a-button>
   </div>
 </template>
 
@@ -86,10 +99,10 @@ function cancelRename() {
   min-height: 40px;
   flex-shrink: 0;
 }
-.chat__log-btn {
+.chat__head-btn {
   margin-left: 8px;
 }
-.chat__changes-btn {
+.chat__head-btn:first-of-type {
   margin-left: auto;
 }
 .chat__titlebar-text {

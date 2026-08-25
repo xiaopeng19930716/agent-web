@@ -27,11 +27,12 @@ export async function fetchSessions(archived) {
   // 给历史消息补稳定 id：旧会话（加 id 之前）的消息没有 id 字段，
   // 若不补，回退时 undefined===undefined 会误匹配到第一条，导致截断到 idx=0 清空前文。
   for (const s of list) {
-    if (Array.isArray(s.messages)) {
-      s.messages.forEach((m, i) => {
-        if (!m.id) m.id = 'm_legacy_' + s.id + '_' + i
-      })
-    }
+  if (Array.isArray(s.messages)) {
+    s.messages.forEach((m, i) => {
+      if (!m.id) m.id = 'm_legacy_' + s.id + '_' + i
+    })
+  }
+  if (!Array.isArray(s.todos)) s.todos = []
   }
   sessions.list = list
   return list

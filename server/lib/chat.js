@@ -9,6 +9,7 @@ import {
 import { BaseCallbackHandler } from '@langchain/core/callbacks/base'
 import { DASHSCOPE_BASE, API_KEY, DEFAULT_MODEL, MODELS_FILE, readConfigFile } from './config.js'
 import { buildTools, previewFileChange } from './fileTools.js'
+import { sessions } from './store.js'
 
 // 从服务端持久化的 models.json 解析指定模型的密钥与 baseURL，
 // 避免前端在 /chat 请求中明文传递 apiKey。密钥完全来自用户配置，不读取环境变量。
@@ -156,6 +157,7 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
     effortHint = '',
     confirmGate = null, // 「需确认(ask)」模式下的确认闸门；非 ask 时为 null
     abortSignal = null, // 停止生成信号；收到 abort 后尽快中断循环与工具调用
+    sessionId = null, // 当前会话 id，用于把 todoWrite 状态写入会话并推前端
   } = opts
   // 文件工具边界：有项目用项目根；无项目用用户主目录（fileRoot 由路由层给定），
   // 这样无项目对话也能读取/查询桌面、文档等主目录下的文件，同时 safeResolve 仍约束不能越界。
@@ -183,7 +185,7 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
     for (const call of toolCalls) {
       // 工具执行前再次检查停止信号
       if (abortSignal?.aborted) break
-      const result = await executeToolCall(call, toolMap, res, { toolRoot, permission, confirmGate, abortSignal })
+      const result = await executeToolCall(call, toolMap, res, { toolRoot, permission, confirmGate, abortSignal, sessionId })
       messages.push(new ToolMessage({ content: result, tool_call_id: call.id }))
     }
     if (abortSignal?.aborted) break
@@ -254,7 +256,7 @@ async function streamModelTurn(modelWithTools, messages, res, callbacks, abortSi
 // toolRoot：文件工具安全边界（项目根/主目录），由调用方传入（不再依赖闭包）
 // options.confirmGate：ask 模式下的确认闸门（非 ask 模式不传，直接执行）
 // options.abortSignal：停止生成信号；执行前/执行中中止则中断
-async function executeToolCall(call, toolMap, res, { toolRoot, permission = 'full', confirmGate = null, abortSignal = null } = {}) {
+async function executeToolCall(call, toolMap, res, { toolRoot, permission = 'full', confirmGate = null, abortSignal = null, sessionId = null } = {}) {
   const tool = toolMap[call.name]
 
   // 执行前检查停止
@@ -298,8 +300,53 @@ async function executeToolCall(call, toolMap, res, { toolRoot, permission = 'ful
   } catch (e) {
     result = '工具执行错误: ' + String(e.message || e)
   }
+
+  // 任务清单工具：拦截并把状态写入会话，再推前端渲染（不依赖工具返回值）
+  if (call.name === 'todoWrite' && sessionId) {
+    const updated = applyTodoUpdate(sessionId, call.args)
+    if (updated) {
+      res.write(`data: ${JSON.stringify({ type: 'todo_update', todos: updated })}\n\n`)
+    }
+  }
+
   res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'end', result: String(result) })}\n\n`)
   return String(result)
+}
+
+// 把 todoWrite 的 action/items 应用到会话的 todos 列表，返回更新后的数组（或 null 表示无效）
+function applyTodoUpdate(sessionId, args) {
+  const session = sessions.get(sessionId)
+  if (!session) return null
+  const action = args && args.action
+  if (action === 'clear') {
+    session.todos = []
+  } else if (action === 'write') {
+    const items = Array.isArray(args.items) ? args.items : []
+    session.todos = items.map((it) => ({
+      content: String(it.content || ''),
+      status: ['pending', 'in_progress', 'completed', 'cancelled'].includes(it.status) ? it.status : 'pending',
+      activeForm: it.activeForm ? String(it.activeForm) : '',
+    }))
+  } else if (action === 'replace') {
+    const items = Array.isArray(args.items) ? args.items : []
+    const map = new Map((session.todos || []).map((t, i) => [t.content, i]))
+    for (const it of items) {
+      const idx = map.get(it.content)
+      if (idx !== undefined) {
+        session.todos[idx].status = ['pending', 'in_progress', 'completed', 'cancelled'].includes(it.status) ? it.status : session.todos[idx].status
+        if (it.activeForm) session.todos[idx].activeForm = String(it.activeForm)
+      } else {
+        session.todos.push({
+          content: String(it.content || ''),
+          status: ['pending', 'in_progress', 'completed', 'cancelled'].includes(it.status) ? it.status : 'pending',
+          activeForm: it.activeForm ? String(it.activeForm) : '',
+        })
+      }
+    }
+  } else {
+    return null
+  }
+  return session.todos
 }
 
 // 破坏性命令识别：与 executeCommand 安全边界一致（不可绕过）

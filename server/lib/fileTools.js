@@ -412,6 +412,40 @@ export function buildTools(root, permission = 'full', toolKeys, mcpServers = {})
         schema: { type: 'object', properties: {}, required: [] },
       }
     ),
+    // 任务清单工具：模型用它维护可见的待办列表（不落盘，状态由 chat.js 写入会话并推给前端）
+    tool(
+      async () => {
+        // 实际状态更新在 chat.js 的 executeToolCall 中拦截处理，这里只返回占位成功
+        return 'ok'
+      },
+      {
+        name: 'todoWrite',
+        description:
+          '维护当前任务的待办清单（让用户在界面上实时看到进度）。' +
+          'action="write" 时整体替换清单（items 为完整列表）；action="replace" 时按 content 合并更新已有项；action="clear" 时清空。' +
+          '每项 status: pending(待办) | in_progress(进行中) | completed(已完成) | cancelled(已取消)。模型应在开始多步任务前 write 一份计划，每完成一步就 update 对应项。',
+        schema: {
+          type: 'object',
+          properties: {
+            action: { type: 'string', enum: ['write', 'replace', 'clear'], description: 'write=整体替换；replace=按内容合并；clear=清空' },
+            items: {
+              type: 'array',
+              description: '任务项列表（action=clear 时可省略）',
+              items: {
+                type: 'object',
+                properties: {
+                  content: { type: 'string', description: '任务描述' },
+                  status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'cancelled'] },
+                  activeForm: { type: 'string', description: '进行中时展示的动名词，如"正在重构登录模块"' },
+                },
+                required: ['content', 'status'],
+              },
+            },
+          },
+          required: ['action'],
+        },
+      }
+    ),
   ]
   // 风险分级：供「需确认(ask)」权限在工具真正执行前发起用户确认
   // read=只读(免确认) / write=写文件(需确认) / danger=执行命令(需确认,且危险命令强制拒绝)
@@ -424,6 +458,7 @@ export function buildTools(root, permission = 'full', toolKeys, mcpServers = {})
     executeCommand: 'danger',
     listMcp: 'read',
     listSkills: 'read',
+    todoWrite: 'read',
   }
   for (const t of all) t.risk = RISK[t.name] || 'read'
 

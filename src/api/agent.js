@@ -1,7 +1,7 @@
 // 调用本地后端，后端再流式转发百炼云
 export async function streamChat(
   messages,
-  { config, projectId, permission, effort, tools, skills, mcpServers, sessionId, onDelta, onReasoning, onToolCall, onToolConfirm, onDone, onError } = {}
+  { config, projectId, permission, effort, tools, skills, mcpServers, sessionId, onDelta, onReasoning, onToolCall, onToolConfirm, onTodoUpdate, onDone, onError } = {}
 ) {
   try {
     const resp = await fetch('/api/chat', {
@@ -54,6 +54,10 @@ export async function streamChat(
           }
           if (json.type === 'tool_confirm') {
             onToolConfirm?.(json)
+            continue
+          }
+          if (json.type === 'todo_update') {
+            onTodoUpdate?.(json.todos)
             continue
           }
           const delta = json.choices?.[0]?.delta?.content || ''

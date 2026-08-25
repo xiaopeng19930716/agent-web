@@ -249,6 +249,7 @@ router.post('/chat', async (req, res) => {
         effortHint,
         confirmGate: perm === 'ask' ? confirmGate : null,
         abortSignal: abortController ? abortController.signal : null,
+        sessionId: sessionId || null,
       }
     )
     writeMeta('ok')
