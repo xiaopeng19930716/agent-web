@@ -1,8 +1,7 @@
 import fs from 'fs'
 import fsp from 'fs/promises'
 import path from 'path'
-import { exec } from 'child_process'
-import { promisify } from 'util'
+import { exec, spawn } from 'child_process'
 import { tool } from '@langchain/core/tools'
 import { scanSkills } from './skills.js'
 import { MCP_FILE, readConfigFile } from './config.js'
@@ -33,9 +32,20 @@ function readEnabledMcpServers() {
   return out
 }
 
-const execAsync = promisify(exec)
 // 命令输出截断上限，避免超大输出（如 build 日志）撑爆模型上下文
 const MAX_CMD_OUTPUT = 8000
+
+// 跨平台杀掉进程树（含子进程）：Windows 用 taskkill 杀整棵子树，POSIX 用进程组 SIGTERM
+function killProcessTree(child) {
+  if (!child || !child.pid) return
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+    } else {
+      process.kill(-child.pid, 'SIGTERM')
+    }
+  } catch { /* 进程可能已退出，忽略 */ }
+}
 
 // 文件工具（严格限制在项目根目录内）
 export function safeResolve(root, rel) {
@@ -197,7 +207,7 @@ export function searchFiles(root, keyword, maxResults = 50) {
   return out
 }
 
-export function buildTools(root, permission = 'full', toolKeys, mcpServers = {}) {
+export function buildTools(root, permission = 'full', toolKeys, mcpServers = {}, abortSignal = null) {
   // permission: 'full' 可写；'read-only' / 'none' 禁止写入文件
   // toolKeys：可选，允许启用的工具 key（listFiles/readFile/writeFile/editFile/searchInProject/listMcp/listSkills）。
   // 未传或非数组 -> 返回全部；空数组 -> 返回 []；否则按 key 过滤。
@@ -320,35 +330,38 @@ export function buildTools(root, permission = 'full', toolKeys, mcpServers = {})
           let ms = Number(timeout)
           if (!Number.isFinite(ms) || ms <= 0) ms = 60000
           ms = Math.min(ms, 5 * 60 * 1000) // 上限 5 分钟，防止卡死
-          try {
-            const { stdout, stderr } = await execAsync(command, {
-              cwd: workDir,
-              timeout: ms,
-              maxBuffer: 8 * 1024 * 1024,
-              windowsHide: true,
-            })
-            let out = ''
-            if (stdout) out += stdout
-            if (stderr) out += (out ? '\n[stderr]\n' : '') + stderr
-            if (!out.trim()) out = '(命令已执行，无输出)'
-            if (out.length > MAX_CMD_OUTPUT) {
-              out = out.slice(0, MAX_CMD_OUTPUT) + `\n… (输出已截断，原始共 ${out.length} 字符)`
+          const truncate = (s) =>
+            s.length > MAX_CMD_OUTPUT ? s.slice(0, MAX_CMD_OUTPUT) + `\n… (输出已截断，原始共 ${s.length} 字符)` : s
+          // 用回调式 exec 以便支持「停止」中断：abort 时杀掉整个进程树，避免命令在后台继续跑
+          return new Promise((resolve) => {
+            const child = exec(
+              command,
+              { cwd: workDir, timeout: ms, maxBuffer: 8 * 1024 * 1024, windowsHide: true, detached: process.platform !== 'win32' },
+              (err, stdout, stderr) => {
+                if (err) {
+                  if (abortSignal && abortSignal.aborted) return resolve('[已中断] 命令已被用户中止')
+                  const out = [stdout, stderr].filter(Boolean).join('\n')
+                  let msg = `命令执行失败（退出码 ${err.code}）`
+                  if (out) msg += '\n' + out
+                  if (!out) msg += '\n' + (err.message || String(err))
+                  return resolve(truncate(msg))
+                }
+                let out = ''
+                if (stdout) out += stdout
+                if (stderr) out += (out ? '\n[stderr]\n' : '') + stderr
+                if (!out.trim()) out = '(命令已执行，无输出)'
+                resolve(truncate(out))
+              }
+            )
+            if (abortSignal) {
+              const onAbort = () => {
+                killProcessTree(child)
+                resolve('[已中断] 命令已被用户中止')
+              }
+              if (abortSignal.aborted) onAbort()
+              else abortSignal.addEventListener('abort', onAbort, { once: true })
             }
-            return out
-          } catch (e) {
-            const code = e.code
-            const errOut = e.stdout || ''
-            const errErr = e.stderr || ''
-            let msg = `命令执行失败（退出码 ${code}）`
-            if (errOut) msg += '\n[stdout]\n' + errOut
-            if (errErr) msg += '\n[stderr]\n' + errErr
-            if (!errOut && !errErr) msg += '\n' + (e.message || String(e))
-            // 失败输出同样截断，避免异常日志撑爆上下文
-            if (msg.length > MAX_CMD_OUTPUT) {
-              msg = msg.slice(0, MAX_CMD_OUTPUT) + `\n… (输出已截断，原始共 ${msg.length} 字符)`
-            }
-            return msg
-          }
+          })
         })
       },
       {

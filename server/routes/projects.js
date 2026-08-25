@@ -72,12 +72,11 @@ router.get('/locate-dir', async (req, res) => {
     res.status(400).json({ error: '缺少 name 或 path 参数' })
     return
   }
-  const roots = [
-    path.join(os.homedir()),
-    'C:/',
-    'D:/',
-    'E:/',
-  ].filter((r) => {
+  // 动态枚举搜索根：用户主目录 + 所有存在的盘符（Windows A:/~Z:/，POSIX 上这些路径不存在会被过滤），
+  // 避免写死 C/D/E 导致用户其他盘（F:、G: 等）上的目录定位不到
+  const roots = [path.join(os.homedir())]
+  for (let c = 65; c <= 90; c++) roots.push(`${String.fromCharCode(c)}:/`)
+  const validRoots = roots.filter((r) => {
     try {
       return fs.existsSync(r) && fs.statSync(r).isDirectory()
     } catch {
@@ -90,7 +89,7 @@ router.get('/locate-dir', async (req, res) => {
     const segs = relRaw
       .split(/[\\/]+/)
       .filter((s) => s && s !== '.' && s !== '..' && !s.includes(':') && !/^[a-zA-Z]$/.test(s))
-    for (const root of roots) {
+    for (const root of validRoots) {
       const full = path.join(root, ...segs)
       try {
         if (fs.statSync(full).isDirectory()) {
@@ -154,10 +153,21 @@ router.get('/locate-dir', async (req, res) => {
     }
   }
   if (name) {
-    for (const r of roots) {
+    for (const r of validRoots) {
       if (results.length >= MAX_RESULTS) break
       await walk(r, 1)
     }
+  }
+  if (results.length === 0 && name && !relRaw) {
+    // 按名搜索失败且无相对路径可校验：给出针对性提示
+    // （常见于目标位于隐藏目录如 .config/AppData，或自定义盘符/深目录，这些位置自动定位刻意不扫描）
+    res.json({
+      results: [],
+      hint:
+        `未能在常见目录中找到「${name}」。` +
+        '自动定位不扫描隐藏目录（如 .config、AppData），请手动粘贴完整绝对路径。',
+    })
+    return
   }
   res.json({ results })
 })

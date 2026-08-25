@@ -55,8 +55,32 @@ function createTransport(serverConfig) {
   return new StdioClientTransport({ command: cmd, args })
 }
 
+// MCP 工具只读启发式：仅当名称/描述明确只读时才判为只读，否则保守视为「可写」。
+// 这样计划模式默认只放行“看起来安全”的 MCP 工具，其余一律不暴露。
+const READ_HINTS = /\b(read|get|fetch|list|query|search|find|describe|inspect|browse|cat|stat|info|show|lookup|preview|ping|status)\b/i
+const WRITE_HINTS = /\b(write|create|edit|update|delete|remove|add|set|push|commit|send|post|put|upload|save|move|rename|copy|make|build|run|exec|install|publish|deploy|format|start|stop|restart|clear|drop|insert|patch)\b/i
+
+function inferMcpRisk(toolName, description, serverReadOnly) {
+  // 用户显式声明优先（服务器级 readOnly：true=整台只读 / false=整台可写）
+  if (typeof serverReadOnly === 'boolean') return serverReadOnly ? 'read' : 'write'
+  const text = toolName + ' ' + (description || '')
+  if (WRITE_HINTS.test(text) && !READ_HINTS.test(toolName)) return 'write'
+  if (READ_HINTS.test(text) && !WRITE_HINTS.test(text)) return 'read'
+  return 'write' // 无法确定 -> 保守视为写
+}
+
+// 判断单个 MCP 工具的读写风险（优先级：标准 annotations > 服务器配置 readOnly > 启发式）
+function resolveMcpRisk(mcpToolDef, serverConfig) {
+  const ann = mcpToolDef.annotations || {}
+  if (ann.readOnlyHint === true) return 'read'
+  if (ann.destructiveHint === true) return 'write'
+  return inferMcpRisk(mcpToolDef.name, mcpToolDef.description, serverConfig && serverConfig.readOnly)
+}
+
 // 加载 MCP 服务器并返回封装好的 LangChain 工具数组。
-// mcpServers：{ [name]: { type, command?, url?, enabled? } }。单个服务器失败时降级跳过，不影响其余。
+// mcpServers：{ [name]: { type, command?, url?, enabled?, readOnly? } }。
+// readOnly 为布尔时表示「整台服务器只读/可写」（用户在设置面板手动标记）；
+// 单个服务器失败时降级跳过，不影响其余。每个工具会携带 metadata.risk（read/write）。
 export async function loadMcpTools(mcpServers) {
   if (!mcpServers || typeof mcpServers !== 'object') return []
   const enabled = Object.entries(mcpServers).filter(([, cfg]) => cfg && cfg.enabled !== false)
@@ -74,26 +98,31 @@ export async function loadMcpTools(mcpServers) {
       const { tools } = await client.listTools()
       for (const t of tools || []) {
         const zodSchema = jsonSchemaToZod(t.inputSchema)
-        allTools.push(
-          tool(
-            async (args) => {
-              try {
-                const result = await client.callTool({ name: t.name, arguments: args || {} })
-                const texts = (result?.content || [])
-                  .filter((b) => b && b.type === 'text' && typeof b.text === 'string')
-                  .map((b) => b.text)
-                return texts.length ? texts.join('\n') : JSON.stringify(result)
-              } catch (e) {
-                return 'MCP 工具执行错误: ' + String(e?.message || e)
-              }
-            },
-            {
-              name: `${serverName}__${t.name}`,
-              description: `[MCP:${serverName}] ${t.description || t.name}`,
-              schema: zodSchema,
+        const risk = resolveMcpRisk(t, serverConfig)
+        const mcpTool = tool(
+          async (args) => {
+            try {
+              const result = await client.callTool({ name: t.name, arguments: args || {} })
+              const texts = (result?.content || [])
+                .filter((b) => b && b.type === 'text' && typeof b.text === 'string')
+                .map((b) => b.text)
+              return texts.length ? texts.join('\n') : JSON.stringify(result)
+            } catch (e) {
+              return 'MCP 工具执行错误: ' + String(e?.message || e)
             }
-          )
+          },
+          {
+            name: `${serverName}__${t.name}`,
+            description: `[MCP:${serverName}] ${t.description || t.name}`,
+            schema: zodSchema,
+          }
         )
+        // 手动挂载风险标记（避免依赖 LangChain tool() 对 metadata 的支持差异）
+        mcpTool.risk = risk
+        mcpTool.metadata = mcpTool.metadata || {}
+        mcpTool.metadata.risk = risk
+        mcpTool.metadata.serverName = serverName
+        allTools.push(mcpTool)
       }
     } catch (e) {
       console.error(`加载 MCP 服务器 ${serverName} 失败（已跳过）:`, e?.message || e)

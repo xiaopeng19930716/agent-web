@@ -28,11 +28,13 @@ async function pickDirectory() {
     const dirName = handle.name
     formError.value = '正在定位目录…'
     const relSegments = []
+    let hasHiddenSeg = dirName.startsWith('.')
     let cur = handle
     try {
       while (cur && typeof cur.getParent === 'function') {
         const parent = await cur.getParent()
         if (!parent || !parent.name) break
+        if (parent.name.startsWith('.')) hasHiddenSeg = true
         relSegments.unshift(parent.name)
         if (relSegments.length >= 10) break
         cur = parent
@@ -60,23 +62,43 @@ async function pickDirectory() {
           formError.value = ''
           return
         }
+        if (data.hint) {
+          // 定位失败：不预填仅含目录名的相对路径，留空让用户直接粘贴真实绝对路径
+          form.path = ''
+          form.displayName = ''
+          form.needsManualPath = true
+          formError.value = data.hint
+          return
+        }
       }
     } catch {
       // 定位失败，回退到手动输入
     }
-    form.path = form.displayName
+    // 定位失败：不预填相对路径，留空让用户直接粘贴真实绝对路径
+    form.path = ''
+    form.displayName = ''
     form.needsManualPath = true
-    formError.value = '未能自动定位到完整路径，请在输入框手动补全绝对路径（如 C:/Users/.../' + dirName + '）'
+    formError.value = hasHiddenSeg
+      ? '检测到该目录位于隐藏目录（. 开头）下，浏览器无法自动定位完整路径，请点击输入框手动粘贴绝对路径（如 C:/Users/你的用户名/.config/opencode/skills）'
+      : '未能自动定位到完整路径，请在输入框手动补全绝对路径（如 C:/Users/.../' + dirName + '）'
   } catch (e) {
     // 用户取消选择
   }
 }
 
 // 兜底情况下允许用户在输入框手动补全绝对路径
+// 注意：不能把 needsManualPath 置 false，否则 path 非空时 readonly 会立即锁死输入框，导致无法连续删除
 function onPathInput(e) {
   form.displayName = e.target.value
   form.path = e.target.value
-  form.needsManualPath = false
+  form.needsManualPath = true
+}
+
+// 点击已自动定位的输入框时解锁为可编辑，允许用户手动修正/清空路径
+function unlockEdit() {
+  if (form.path && !form.needsManualPath) {
+    form.needsManualPath = true
+  }
 }
 
 async function confirmAdd() {
@@ -119,8 +141,9 @@ function cancel() {
             :readonly="!!form.path && !form.needsManualPath"
             :class="{ 'input--readonly': !!form.path && !form.needsManualPath }"
             :title="form.path"
-            placeholder="请点击右侧按钮选择目录"
+            :placeholder="form.needsManualPath ? '请粘贴完整绝对路径，如 C:/Users/你的用户名/.config/opencode/skills' : '请点击右侧按钮选择目录'"
             @input="onPathInput"
+            @click="unlockEdit"
           />
           <button
             type="button"

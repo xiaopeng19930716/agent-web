@@ -142,7 +142,7 @@ export function buildChatModel(cfg, callbacks) {
 // 全程流式输出到 res（reasoning 增量 + 正文增量 + 工具调用结构化事件）
 // 单条工具重跑（#10 工具重试）：供 /api/chat/retry-tool 复用同一执行+确认+拦截逻辑
 export async function runSingleTool({ toolRoot, permission, name, args, res, confirmGate, abortSignal }) {
-  const tools = buildTools(toolRoot, permission, null, null)
+  const tools = buildTools(toolRoot, permission, null, null, abortSignal)
   const toolMap = Object.fromEntries(tools.map((t) => [t.name, t]))
   const call = { id: 'retry-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8), name, args }
   return executeToolCall(call, toolMap, res, { toolRoot, permission, confirmGate, abortSignal })
@@ -163,7 +163,7 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
   // 文件工具边界：有项目用项目根；无项目用用户主目录（fileRoot 由路由层给定），
   // 这样无项目对话也能读取/查询桌面、文档等主目录下的文件，同时 safeResolve 仍约束不能越界。
   const toolRoot = fileRoot || projectRoot || os.homedir()
-  const { modelWithTools, toolMap } = buildModelWithTools(model, toolRoot, permission, enabledTools, mcpTools, mcpServers)
+  const { modelWithTools, toolMap } = buildModelWithTools(model, toolRoot, permission, enabledTools, mcpTools, mcpServers, [], abortSignal)
   const messages = buildSystemMessages(history, skillPrompts, effortHint, { permission, projectRoot })
 
   const MAX_TURNS = 12
@@ -195,8 +195,8 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
 
 // 组装工具（文件工具受项目目录安全边界约束 + MCP 工具），并绑定到模型
 // 没有工具时返回原模型，避免 bindTools([]) 行为异常
-function buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools, mcpServers = {}, extraTools = []) {
-  const tools = [...extraTools, ...buildTools(projectRoot, permission, enabledTools, mcpServers), ...mcpTools]
+function buildModelWithTools(model, projectRoot, permission, enabledTools, mcpTools, mcpServers = {}, extraTools = [], abortSignal = null) {
+  const tools = [...extraTools, ...buildTools(projectRoot, permission, enabledTools, mcpServers, abortSignal), ...mcpTools]
   const toolMap = Object.fromEntries(tools.map((t) => [t.name, t]))
   const modelWithTools = tools.length ? model.bindTools(tools) : model
   return { modelWithTools, toolMap }
@@ -285,8 +285,9 @@ async function executeToolCall(call, toolMap, res, { toolRoot, permission = 'ful
     return denied
   }
 
-  // ask 模式 + 高风险工具 -> 暂停等待用户确认
-  const needConfirm = permission === 'ask' && confirmGate && tool && (tool.risk === 'write' || tool.risk === 'danger')
+  // ask 模式 + 高风险工具 -> 暂停等待用户确认（内置工具看 risk，MCP 工具看 metadata.risk）
+  const toolRisk = tool?.metadata?.risk || tool?.risk
+  const needConfirm = permission === 'ask' && confirmGate && tool && (toolRisk === 'write' || toolRisk === 'danger')
   if (needConfirm) {
     // 确认前预计算文件改动（不落盘），供前端渲染 diff；非文件工具返回 null
     const preview = previewFileChange(toolRoot, call.name, call.args)
@@ -308,7 +309,14 @@ async function executeToolCall(call, toolMap, res, { toolRoot, permission = 'ful
   try {
     result = tool ? await tool.invoke(call.args) : '未知工具: ' + call.name
   } catch (e) {
-    result = '工具执行错误: ' + String(e.message || e)
+    if (abortSignal?.aborted) result = '已停止生成（用户中断）。'
+    else result = '工具执行错误: ' + String(e.message || e)
+  }
+  // 工具执行期间用户中止 -> 立即结束当前 Agent 循环（executeCommand 内部已杀掉进程树）
+  if (abortSignal?.aborted) {
+    const msg = '已停止生成（用户中断）。'
+    writeEv({ id: call.id, name: call.name, status: 'canceled', result: msg })
+    return msg
   }
 
   // 任务清单工具：拦截并把状态写入会话，再推前端渲染（不依赖工具返回值）
@@ -472,12 +480,16 @@ const planTasksTool = tool(
   }
 )
 
-// 规划者系统提示：只拆解、不执行
+// 规划者系统提示：先对话澄清需求，确认清楚后再 planTasks 收口（支持连续交谈）
 function buildPlanSystemPrompt(permission, projectRoot) {
   return (
     buildSystemPrompt({ permission, projectRoot }) +
-    '\n\n你当前处于「计划模式」。请先理解用户需求，将其拆解为若干有序、可执行、彼此相对独立的子任务，然后调用 planTasks 工具提交这份计划（仅需调用一次）。' +
-    '在计划模式下不要直接执行任务或修改文件，只产出高质量拆解。每个子任务包含清晰标题与说明；若任务简单无需拆解，可只提交 1 个子任务。'
+    '\n\n你当前处于「计划模式」。目标是与用户协作、逐步明确需求，最终产出一份高质量、可执行的计划。' +
+    '请遵循以下原则：' +
+    '\n1. 先理解用户意图；若信息不足或存在歧义，主动用自然语言向用户提问澄清。你的提问会以正常对话形式呈现给用户，用户回复后你会继续本论对话——不要急于在第一轮就提交计划。' +
+    '\n2. 你可以调用只读类工具（如读取文件、搜索、列目录）来了解项目，帮助制定更贴合的计划；但在计划模式下不要修改任何文件或执行写操作，也不要调用 planTasks 之外会改变状态的工具。' +
+    '\n3. 当你已经掌握足够信息、能够给出清晰可执行的计划时，再调用 planTasks 工具提交计划（只需调用一次）。每个子任务包含清晰标题与说明；若任务简单无需拆解，可只提交 1 个子任务。' +
+    '\n4. 如果用户后续又提出新的要求或调整，可重新澄清并再次调用 planTasks 更新计划。'
   )
 }
 
@@ -502,22 +514,25 @@ function normalizePlan(items) {
     .filter((it) => it.title)
 }
 
-// 计划阶段：让主 Agent 拆解并提交 planTasks（静默主消息，subId=false）
+// 计划阶段：可见的连续对话，模型先澄清需求，确认清楚后调用 planTasks 收口（subId=null 流式写入主消息）
 async function runPlanPhase(model, history, projectRoot, res, permission, callbacks, opts) {
   const toolRoot = opts.fileRoot || projectRoot || os.homedir()
+  // 计划模式严禁任何写操作：仅开放只读探索工具 + planTasks + 被判定为只读的 MCP 工具，并把权限降级为 read-only（双保险）
+  const PLAN_READONLY_TOOLS = ['listFiles', 'readFile', 'searchInProject', 'listMcp', 'listSkills', 'todoWrite']
+  const planMcpTools = (opts.mcpTools || []).filter((t) => (t.metadata?.risk || t.risk) !== 'write')
   const { modelWithTools, toolMap } = buildModelWithTools(
-    model, toolRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers, [planTasksTool]
+    model, toolRoot, 'read-only', PLAN_READONLY_TOOLS, planMcpTools, opts.mcpServers, [planTasksTool], opts.abortSignal
   )
-  const sysText = buildPlanSystemPrompt(permission, projectRoot)
+  const sysText = buildPlanSystemPrompt('read-only', projectRoot)
   const messages = [new SystemMessage(sysText), ...history]
   const MAX_TURNS = 6
   let plan = null
-  // 计划阶段静默：SSE 抑制已由调用的 subId=false 实现（streamModelTurn/executeToolCall 内部据此不写 SSE），
-  // 此处直接复用 LangChain 回调数组即可，切勿展开成对象（会导致 CallbackManager 遍历非数组而抛错）。
-  const silent = callbacks
+  // 计划阶段改为「可见的连续对话」：模型的正文/思考通过 subId=null 流式写入主消息，
+  // 用户可阅读并回复（澄清需求）；工具探索仍静默（subId=false），保持规划对话清爽。
+  // callbacks 直接透传给底层 stream（切勿展开成对象，否则 CallbackManager 遍历非数组会抛错）。
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     if (opts.abortSignal?.aborted) break
-    const { aiContent, toolCalls } = await streamModelTurn(modelWithTools, messages, res, silent, opts.abortSignal, false)
+    const { aiContent, toolCalls } = await streamModelTurn(modelWithTools, messages, res, callbacks, opts.abortSignal, null)
     messages.push(new AIMessage({ content: aiContent, tool_calls: toolCalls }))
     if (!toolCalls.length) { plan = null; break } // 未拆解，直接作答 -> 退回普通对话
     let stop = false
@@ -542,7 +557,7 @@ async function runPlanPhase(model, history, projectRoot, res, permission, callba
 // 单个子 Agent 执行：独立 Agent 循环，事件带 subId 供前端区分主/子
 async function runSubAgent({ model, history, projectRoot, res, permission, callbacks, opts, task, subId, abortSignal }) {
   const toolRoot = opts.fileRoot || projectRoot || os.homedir()
-  const { modelWithTools, toolMap } = buildModelWithTools(model, toolRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers)
+  const { modelWithTools, toolMap } = buildModelWithTools(model, toolRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers, [], abortSignal)
   const sysText = buildSubAgentSystemPrompt(task, permission, projectRoot)
   const messages = [
     new SystemMessage(sysText),
@@ -605,11 +620,9 @@ export async function runPlanAndExecute(model, history, projectRoot, res, permis
   res.write(`data: ${JSON.stringify({ type: 'phase', phase: 'plan', status: 'start' })}\n\n`)
   const plan = await runPlanPhase(model, history, projectRoot, res, permission, callbacks, opts)
   if (!plan || !plan.length) {
-    // 未产出计划：回退为普通对话（直接回答）
-    res.write(`data: ${JSON.stringify({ type: 'phase', phase: 'plan', status: 'failed' })}\n\n`)
-    const { modelWithTools, toolMap } = buildModelWithTools(model, opts.fileRoot || projectRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers)
-    const messages = buildSystemMessages(history, opts.skillPrompts || [], opts.effortHint || '', { permission, projectRoot })
-    await runSimpleReply(modelWithTools, toolMap, messages, res, callbacks, { ...opts, permission })
+    // 未产出计划：说明本轮只是一次「规划对话」（模型在澄清需求/提问），
+    // 其正文已在 runPlanPhase 内流式写入主消息。直接结束，让用户继续下一轮交谈。
+    res.write(`data: ${JSON.stringify({ type: 'phase', phase: 'plan', status: 'chat' })}\n\n`)
     return
   }
 
@@ -663,7 +676,7 @@ export async function runPlanAndExecute(model, history, projectRoot, res, permis
     const sysText = buildSystemPrompt({ permission: 'full', projectRoot: '' }) +
       '\n\n你正在对刚刚由多个子 Agent 协作完成的任务做最终汇总。请基于各子任务的执行结果，向用户给出清晰、简洁的整体结论、关键产出与后续建议。'
     const messages = [new SystemMessage(sysText), ...history, new HumanMessage(`以下是各子任务的执行结果，请据此给出整体总结与结论：\n\n${summaryText}`)]
-    const { modelWithTools, toolMap } = buildModelWithTools(model, opts.fileRoot || projectRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers)
+    const { modelWithTools, toolMap } = buildModelWithTools(model, opts.fileRoot || projectRoot, permission, opts.enabledTools, opts.mcpTools, opts.mcpServers, [], opts.abortSignal)
     await runSimpleReply(modelWithTools, toolMap, messages, res, callbacks, { ...opts, permission })
   }
   res.write(`data: ${JSON.stringify({ type: 'phase', phase: 'done', status: 'end' })}\n\n`)

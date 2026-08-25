@@ -19,7 +19,7 @@ const TYPE_META = {
 
 const editOpen = ref(false)
 const editId = ref('')
-const form = reactive({ name: '', type: 'local', command: '', url: '', enabled: true })
+const form = reactive({ name: '', type: 'local', command: '', url: '', enabled: true, readOnly: false })
 const formError = ref('')
 
 // 测试连接状态：{ [id]: { testing, ok, message } }
@@ -55,7 +55,8 @@ const mcpList = computed(() => {
     const command = Array.isArray(cfg.command) ? cfg.command.join(' ') : ''
     const url = cfg.url || ''
     const enabled = !settings.disabledMcpServers.includes(name)
-    out.push({ name, type, command, url, enabled })
+    const readOnly = !!cfg.readOnly
+    out.push({ name, type, command, url, enabled, readOnly })
   }
   return out
 })
@@ -195,7 +196,7 @@ function importSelectedMcp() {
 // ===== 本地编辑 =====
 function startAdd() {
   editId.value = ''
-  Object.assign(form, { name: '', type: 'local', command: '', url: '', enabled: true })
+  Object.assign(form, { name: '', type: 'local', command: '', url: '', enabled: true, readOnly: false })
   formError.value = ''
   editOpen.value = true
 }
@@ -211,6 +212,7 @@ function startEdit(name) {
     command: Array.isArray(cfg.command) ? cfg.command.join(' ') : '',
     url: cfg.url || '',
     enabled: !settings.disabledMcpServers.includes(name),
+    readOnly: !!cfg.readOnly,
   })
   formError.value = ''
   editOpen.value = true
@@ -245,7 +247,7 @@ function save() {
     delete settings.mcpServers[editId.value]
     settings.disabledMcpServers = settings.disabledMcpServers.filter((n) => n !== editId.value)
   }
-  const cfg = { type: form.type }
+  const cfg = { type: form.type, readOnly: !!form.readOnly }
   if (form.type === 'local') cfg.command = form.command.trim().split(/\s+/).filter(Boolean)
   else cfg.url = form.url.trim()
   settings.mcpServers[name] = cfg
@@ -323,6 +325,7 @@ async function testConnection(name) {
             <div class="flex items-center gap-2 flex-wrap">
               <span class="font-semibold text-gray-800 dark:text-gray-100 text-sm">{{ s.name }}</span>
               <a-tag :color="TYPE_META[s.type].color" class="!m-0">{{ TYPE_META[s.type].label }}</a-tag>
+              <a-tag v-if="s.readOnly" color="green" class="!m-0">计划放行</a-tag>
               <a-tag v-if="!s.enabled" class="!m-0">已停用</a-tag>
             </div>
             <div class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate mt-0.5">{{ typeSummary(s) }}</div>
@@ -524,6 +527,13 @@ async function testConnection(name) {
         <div class="flex items-center justify-between">
           <span class="text-xs font-semibold text-gray-700 dark:text-gray-300">启用</span>
           <a-switch v-model:checked="form.enabled" />
+        </div>
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300">计划模式下放行</span>
+            <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">默认情况下计划模式下无法使用该 MCP 工具，勾选后可在计划模式下调用</p>
+          </div>
+          <a-switch v-model:checked="form.readOnly" />
         </div>
         <div v-if="formError" class="text-sm text-red-500">{{ formError }}</div>
         <div class="flex items-center justify-end gap-2 pt-1">
