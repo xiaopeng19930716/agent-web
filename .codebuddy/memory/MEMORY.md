@@ -17,20 +17,19 @@
 | #3 | 多轮编辑/重新生成 | ✅ | regenerate + 编辑历史消息后重试均已落地（用户 2026-08-25 确认） |
 | #4 | 消息内代码块操作（应用到文件/编辑器打开） | ⏸ 暂搁置 | 仅复制；缺「应用到文件」 |
 | #5 | 导出对话（MD/JSON）、清屏 | ⏸ 暂搁置 | 用户 2026-08-25 说暂搁置 |
-| #6 | 多 Agent/子任务编排（plan→execute） | ✅ 完成 | P1–P8 完成 + 2026-08-25 加固：① 计划模式强制只读——`runPlanPhase` 工具集限为只读清单（listFiles/readFile/searchInProject/listMcp/listSkills/todoWrite）+ 权限降级 read-only + 系统提示只读，写文件/执行命令彻底不可用；② 子 Agent 可中断——`abortSignal` 全链路透传（runAgent/runSubAgent/汇总/工具重试），`executeCommand` 中止时 `killProcessTree` 杀进程树（win32 taskkill /T /F，POSIX 进程组 SIGTERM），主界面停止 → 子 Agent 同步停；③ MCP 工具三层只读标记（annotations.readOnlyHint/destructiveHint → 服务器配置 readOnly 开关 → 启发式兜底），计划模式仅放行只读 MCP 工具，ask 模式 MCP 写工具也纳入确认闸门；前端 McpSettings.vue 新增「计划模式下放行」开关 |
+| #6 | 多 Agent/子任务编排（plan→execute） | ⬜ 未做 | 用户 2026-08-25 说稍后再做 |
 | #7 | 待办/任务清单 todo | ✅ | TodoPanel.vue + todoWrite 工具 + todo_update 事件 |
 | #8 | 增量文件编辑确认带 diff | ✅ | tool_confirm 事件 + confirm-diff 预览 + 允许/拒绝 |
-| #9 | 图像/截图理解 | ✅ | |
+| #9 | 图像/截图理解 | ✅ | 2026-08-25 实现（见下） |
 | #10 | 工具调用回放/重试单条 | ✅ | MessageList 重试按钮 + /api/chat/retry-tool |
-| #11 | 流式超时与重连（SSE 断流重连+缓冲） | ✅ | |
+| #11 | 流式超时与重连（SSE 断流重连+缓冲） | ✅ | 2026-08-25 实现（见下） |
 | #12 | 用量统计页面 | ✅ | 2026-08-25 新建独立 `/usage` 页（见下） |
-| #13 | 暗色模式 | ✅ | |
+| #13 | 暗色模式 | ✅ | 2026-08-25 完成全局统一（见下） |
 | #14 | Cmd+Enter / Enter 发送 | ✅ | |
 | #16 | 首 token 延迟显示 | ✅ | |
-| #17 | 高级设置：计划/执行阶段温度 | ✅ 完成 | 2026-08-25：① 模型设置页每模型补上温度输入框（0~2 step 0.1，存 options.temperature）；② 新增设置子菜单「高级设置」页 /settings/advanced（AdvancedSettings.vue）：计划模式温度默认 0.7（规划发散）、执行模式温度默认空=跟随主模型（执行严谨）；③ settings.js 新增 planTemperature/execTemperature 并持久化；④ 后端 useStageModel() 按阶段重建模型：runPlanPhase 用 planTemperature、runSubAgent 用 execTemperature，未设置/非法时沿用主模型 | 
-| #13b | 代理/网络配置（baseURL、系统代理） | 🚫 不做 | 用户 2026-08-25 确认不做 |
+| #13b | 代理/网络配置（baseURL、系统代理） | 🗑 已移除 | 用户确认前端 Electron 打包前后端一体，无需自定义地址/代理，从清单删去 |
 
-### 剩余未做：无 ｜ 暂搁置：#4 #5 ｜ 不做：#13b
+### 剩余未做：#6 ｜ 暂搁置：#4 #5
 
 ## #12 用量统计页面（2026-08-25 实现细节）
 - 路由：`src/router/index.js` 顶层 `/usage`（独立页，不嵌设置）。
@@ -56,3 +55,24 @@
 - Tailwind 用法：用 `dark:` 变体 + 变量任意值，例：`dark:bg-[var(--color-bg-subtle)]`、`dark:border-[var(--color-border)]`、`dark:text-gray-200`（gray 灰阶作为文字层级可保留，但背景/边框等必须走变量）。
 - ant-design-vue 组件：已通过 `App.vue` 的 `a-config-provider` + `theme.darkAlgorithm` + token（`colorBgContainer:#1e293b` 等）统一暗色；不要给 antdv 组件单独加浅色背景类。
 - 之前已修过：ModelSettings / SettingsPanel / UsageStats / McpSettings / SkillsSettings 的暗色适配（背景/边框/文字全改走变量）。
+
+## 暗色模式根因与修复（2026-08-25）
+- 根因 1：项目只用 `ant-design-vue/dist/reset.css`，没用 `ConfigProvider` + `darkAlgorithm`，所有 antdv 组件暗色下仍是浅皮。**修复**：`src/App.vue` 根部包 `a-config-provider :theme="antdTheme"`，`antdTheme` 按 `isDark` 切 `theme.darkAlgorithm` + token（`colorBgContainer:#1e293b`/`colorBorder:#334155` 等，与项目主色调统一）。
+- 根因 2：`tailwind.config.js` 缺 `darkMode:'class'`，Tailwind 默认 `media` 策略，`dark:` 变体不响应 `html.dark` 类。**修复**：加 `darkMode:'class'`。
+- 根因 3：`.app` 根容器背景用 Less 变量 `@color-bg`（编译期固定浅色），暗色下不切换。**修复**：改 `var(--color-bg)`。
+- 项目暗色主色调是深蓝灰：`--color-bg:#0f172a` / `--color-bg-subtle:#1e293b` / `--color-border:#334155`（定义在 `src/assets/theme.css`），不是纯黑。
+
+## #9 图像/截图理解（2026-08-25 实现细节）
+- 输入方式：📎 按钮选本地图 + Ctrl+V 粘贴截图（均支持多张）。
+- 传输：前端 `FileReader` 读成 dataURL → `POST /api/upload`（JSON `{dataUrl,name,type}`）→ 后端落盘 `server/.uploads/<uuid>.<ext>` → 返回短 URL `/api/upload/<id>`（静态暴露）。前端零新增 npm 依赖（用 `crypto.randomUUID`）。
+- 消息结构：`user.content` 有图时改为多模态数组 `[{type:'text',text},{type:'image_url',image_url:{url}},...]`；无图仍是字符串。
+- 后端 `toLangchainMessage` 已兼容 `image_url`（HumanMessage 原生支持），**后端 chat 逻辑零改动**。
+- 前端改动：`api/agent.js` 新增 `uploadImage`；`ComposerInput.vue`（按钮/粘贴/预览/发送前上传）；`ChatPanel.vue`（send 接收 images、构造多模态 content、estimateTokens 兼容数组）；`MessageList.vue`（气泡渲染文本+缩略图、点击 a-modal 放大）。
+- `server/.uploads` 已加 `.gitignore`。
+- 注意：需模型本身支持 vision（如 qwen-vl / gpt-4o）；token 估算图片按 1000/张。
+
+## #11 SSE 断流重连 + 本地缓冲（2026-08-25 实现细节）
+- 位置：`src/api/agent.js` 的 `streamChat` 加重连包裹。
+- 机制：`runOnce()` 返回 `done`/`error`/`dropped` 三态；外层 `while` 最多 `maxRetries=3` 次，指数退避 `1s/2s/4s`（上限 8s）。`dropped`=网络失败/读流中断/未收[DONE]。`error`（业务/HTTP）不重连。
+- 本地缓冲：`onReset?.()` 在重连前清空 assistant 半成品（content/reasoning/toolCalls/firstTokenMs），避免模型重头生成导致内容重复。
+- UI：`ChatPanel.vue` 加 `reconnecting` 状态 + 顶部「连接中断，正在重连（第 n/3 次）…」脉冲提示条（样式走主题变量）。

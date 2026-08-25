@@ -17,6 +17,9 @@ dist
 dist-ssr
 *.local
 
+# 临时上传的图片（#9 图像理解，运行时生成）
+server/.uploads
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

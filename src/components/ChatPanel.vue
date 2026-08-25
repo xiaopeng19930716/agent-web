@@ -297,7 +297,16 @@ const composerRef = ref(null)
 const msgListRef = ref(null)
 
 // 粗略估算文本 token：中日韩等按 1 字符/token，其余按 4 字符/token
-function estimateTokens(text = '') {
+// 兼容 #9 多模态 content（数组）：图文混合时累加，图片按固定大值估算
+function estimateTokens(content) {
+  if (Array.isArray(content)) {
+    return content.reduce((sum, part) => {
+      if (part.type === 'text') return sum + estimateTokens(part.text || '')
+      if (part.type === 'image_url') return sum + 1000 // 单张图粗略估算
+      return sum
+    }, 0)
+  }
+  const text = typeof content === 'string' ? content : String(content || '')
   const cjk = (text.match(/[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/g) || []).length
   return cjk + Math.ceil((text.length - cjk) / 4)
 }
@@ -354,7 +363,7 @@ async function compressHistory(history, config) {
 
 // 发送：组装与服务调用在容器；前置检查与 DOM 已由 ComposerInput 处理
 async function send(payload) {
-  const { composerTokens, sessionToolCmds, selectedSkills, selectedMcp, planMode = false } = payload
+  const { composerTokens, sessionToolCmds, selectedSkills, selectedMcp, planMode = false, images = [] } = payload
 
   // 确保基础工具清单已加载（首次进入尚未拉取时兜底）
   if (!baseTools.value.length) await loadBaseTools()
@@ -402,6 +411,10 @@ async function send(payload) {
   if (!text && (fileTools.length || skillIds.length || mcpNames.length || composerTokens.some((t) => t.type === 'tag'))) {
     text = '（请使用所选内容完成任务）'
   }
+  // 纯图片无文字时给占位提示
+  if (!text && images.length) {
+    text = '（请描述这张图片）'
+  }
 
   // 没有活动会话则新建
   if (!sessions.activeSessionId) {
@@ -417,11 +430,18 @@ async function send(payload) {
     type: t.type,
     ...(t.type === 'tag' ? { kind: t.kind, key: t.key, label: t.label || t.key } : { text: t.text }),
   }))
-  session.messages.push({ id: newMsgId(), role: 'user', content: text, tags, metadata: { timestamp: Date.now() } })
+  // #9 多模态：有图片时 content 改为 [{type:'text'},{type:'image_url',image_url:{url}}]
+  const userContent = images.length
+    ? [
+        { type: 'text', text },
+        ...images.map((img) => ({ type: 'image_url', image_url: { url: img.url } })),
+      ]
+    : text
+  session.messages.push({ id: newMsgId(), role: 'user', content: userContent, tags, images, metadata: { timestamp: Date.now() } })
   // 清空富文本输入框（委托子组件）
   composerRef.value?.clear()
 
-  await runAssistantTurn(session, { text, pid, fileTools, skillIds, mcpServersPayload, planMode })
+  await runAssistantTurn(session, { text, pid, fileTools, skillIds, mcpServersPayload, planMode, images })
 }
 
 // 基于 session 中已有的上下文（最后一条为 user 消息）生成 assistant 回复。

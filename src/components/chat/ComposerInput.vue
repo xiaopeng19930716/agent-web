@@ -1,9 +1,9 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from "vue";
-import { Plus, ArrowUp, Shield, Zap, AtSign, Hash, FolderOpen, Square, ListTree } from "lucide-vue-next";
+import { Plus, ArrowUp, Shield, Zap, AtSign, Hash, FolderOpen, Square, ListTree, Image as ImageIcon, Loader2, X } from "lucide-vue-next";
 import { settings, saveModels } from "../../settings.js";
 import { activeProjectId } from "../../projects.js";
-import { fetchFileTools } from "../../api/agent.js";
+import { fetchFileTools, uploadImage } from "../../api/agent.js";
 import ModelControl from "./ModelControl.vue";
 import ComposerCmdPanel from "./ComposerCmdPanel.vue";
 import ComposerAtPanel from "./ComposerAtPanel.vue";
@@ -280,8 +280,69 @@ function insertText(text) {
   document.execCommand("insertText", false, text);
 }
 
+// ===== 图片附件（#9 图像理解）=====
+const pendingImages = ref([]); // [{ id, file, preview(objectURL), url, name, type, uploading, error }]
+const uploadingImages = ref(false);
+
+function addImageFiles(files) {
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) continue;
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    pendingImages.value.push({
+      id,
+      file,
+      preview: URL.createObjectURL(file),
+      url: "",
+      name: file.name,
+      type: file.type,
+      uploading: false,
+      error: "",
+    });
+  }
+}
+
+// 文件选择
+function onPickImages(e) {
+  const input = e.target;
+  if (input.files?.length) addImageFiles(input.files);
+  input.value = ""; // 允许重复选择同一文件
+}
+
+// 粘贴截图
+function onPasteImage(e) {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  const files = [];
+  for (const it of items) {
+    if (it.kind === "file" && it.type.startsWith("image/")) {
+      const f = it.getAsFile();
+      if (f) files.push(f);
+    }
+  }
+  if (files.length) {
+    e.preventDefault();
+    addImageFiles(files);
+    return true; // 已处理图片
+  }
+  return false;
+}
+
+// contenteditable paste：先尝试图片，否则走原文本粘贴逻辑
+function onPasteWrap(e) {
+  if (onPasteImage(e)) return;
+  onPaste(e);
+}
+
+function removeImage(id) {
+  const idx = pendingImages.value.findIndex((p) => p.id === id);
+  if (idx >= 0) {
+    URL.revokeObjectURL(pendingImages.value[idx].preview);
+    pendingImages.value.splice(idx, 1);
+  }
+}
+
 // 触发发送：前置检查在容器，组装与网络请求在父级
-function triggerSend() {
+async function triggerSend() {
   if (suppressSend) {
     suppressSend = false;
     return;
@@ -289,12 +350,43 @@ function triggerSend() {
   if (showCmdPanel.value) return;
   if (showAtPanel.value) return;
   syncTokens();
+
+  // 先把待发送图片上传到后端，拿到可访问的短 URL
+  let images = [];
+  if (pendingImages.value.length) {
+    uploadingImages.value = true;
+    try {
+      images = await Promise.all(
+        pendingImages.value.map(async (p) => {
+          const dataUrl = await fileToDataURL(p.file);
+          const url = await uploadImage(dataUrl, p.name, p.type);
+          return { url, name: p.name, type: p.type };
+        })
+      );
+    } catch (err) {
+      uploadingImages.value = false;
+      alert("图片上传失败：" + (err?.message || err));
+      return;
+    }
+    uploadingImages.value = false;
+  }
+
   emit("send", {
     composerTokens: composerTokens.value.map((t) => ({ ...t })),
     sessionToolCmds: [...sessionToolCmds.value],
     selectedSkills: [...selectedSkills.value],
     selectedMcp: [...selectedMcp.value],
     planMode: settings.planMode || false,
+    images,
+  });
+}
+
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
   });
 }
 
@@ -304,6 +396,8 @@ function clear() {
   sessionToolCmds.value = [];
   selectedSkills.value = [];
   selectedMcp.value = [];
+  pendingImages.value.forEach((p) => URL.revokeObjectURL(p.preview));
+  pendingImages.value = [];
   if (composerEl.value) composerEl.value.textContent = "";
 }
 
@@ -404,8 +498,18 @@ function onRingUp() {
         :data-placeholder="settings.planMode ? '计划模式：描述你的任务，AI 会先拆解成子任务，再逐个执行…' : '输入消息，@ 引用文件/目录，/ 选择工具…（Enter 发送，Shift+Enter 换行）'"
         @input="onCmdInput"
         @keydown="onCmdKeydown"
-        @paste="onPaste"
+        @paste="onPasteWrap"
       ></div>
+
+      <!-- 待发送图片预览（#9） -->
+      <div v-if="pendingImages.length" class="chat__img-previews">
+        <div v-for="p in pendingImages" :key="p.id" class="chat__img-thumb">
+          <img :src="p.preview" :alt="p.name" />
+          <button type="button" class="chat__img-remove" title="移除" @click="removeImage(p.id)">
+            <X :size="12" />
+          </button>
+        </div>
+      </div>
 
       <div class="chat__input-footer">
         <div class="chat__footer-left">
@@ -416,6 +520,10 @@ function onRingUp() {
             <button type="button" class="chat__quick-btn" title="选择工具" @click="insertText('/')">
               <Hash :size="14" />
             </button>
+            <button type="button" class="chat__quick-btn" title="上传图片 / 截图" @click="$refs.imageInput.click()">
+              <ImageIcon :size="14" />
+            </button>
+            <input ref="imageInput" type="file" accept="image/*" multiple hidden @change="onPickImages" />
           </div>
           <div class="chat__controls">
             <button
@@ -608,6 +716,48 @@ function onRingUp() {
   color: @color-text-muted;
   pointer-events: none;
   font-size: 14px;
+}
+
+.chat__img-previews {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 2px 0;
+}
+.chat__img-thumb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+}
+.chat__img-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.chat__img-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+.chat__img-remove:hover {
+  background: rgba(0, 0, 0, 0.75);
 }
 
 .chat__input-footer {

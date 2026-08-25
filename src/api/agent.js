@@ -1,3 +1,18 @@
+// 上传图片（#9）：把 dataURL 交给后端落盘，返回可访问的短 URL
+export async function uploadImage(dataUrl, name = '', type = '') {
+  const resp = await fetch('/api/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataUrl, name, type }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    throw new Error(err.error || `上传失败: ${resp.status}`)
+  }
+  const json = await resp.json()
+  return json.url
+}
+
 // 调用本地后端，后端再流式转发百炼云
 // 支持 SSE 断流自动重连（#11）：网络中断时按指数退避重试，最多 maxRetries 次；
 // 重连前通过 onReset 清空本地已累积的半成品，避免重复内容；onReconnecting 用于 UI 提示。

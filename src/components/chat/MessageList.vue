@@ -24,6 +24,12 @@ const props = defineProps({
 
 const emit = defineEmits(['rollback', 'regenerate', 'restore', 'retryTool', 'open-subagent'])
 
+// #9 图片点击放大预览
+const previewUrl = ref('')
+function previewImage(url) {
+  previewUrl.value = url
+}
+
 // 对话级回退：删除该消息及其之后 / 重新生成
 function onEdit(m) {
   emit('rollback', m)
@@ -205,7 +211,19 @@ defineExpose({ clearRetrying })
             v-if="m.role === 'user'"
             class="bubble__text"
           >
-            <template v-if="m.tags && m.tags.length">
+            <template v-if="Array.isArray(m.content)">
+              <template v-for="(part, pi) in m.content" :key="pi">
+                <span v-if="part.type === 'text'">{{ part.text }}</span>
+                <img
+                  v-else-if="part.type === 'image_url'"
+                  class="bubble__img"
+                  :src="part.image_url.url"
+                  alt="图片"
+                  @click="previewImage(part.image_url.url)"
+                />
+              </template>
+            </template>
+            <template v-else-if="m.tags && m.tags.length">
               <template v-for="(t, ti) in m.tags" :key="ti">
                 <span v-if="t.type === 'text'">{{ t.text }}</span>
                 <span
@@ -393,6 +411,18 @@ defineExpose({ clearRetrying })
         <ArrowDown :size="18" />
       </button>
     </transition>
+
+    <!-- #9 图片放大预览 -->
+    <a-modal
+      :open="!!previewUrl"
+      :footer="null"
+      :closable="true"
+      width="auto"
+      wrap-class-name="img-preview-modal"
+      @cancel="previewUrl = ''"
+    >
+      <img :src="previewUrl" style="max-width: 80vw; max-height: 80vh; display: block" />
+    </a-modal>
   </div>
 </template>
 
@@ -971,6 +1001,7 @@ defineExpose({ clearRetrying })
     animation: none !important;
   }
 }
+<<<<<<< HEAD
 /* 计划模式：拆解后的子任务清单卡片 */
 .plan-card {
   border: 1px solid var(--color-border);
@@ -1071,5 +1102,20 @@ defineExpose({ clearRetrying })
 }
 .subagent-ref--start .subagent-ref__status {
   color: var(--brand);
+}
+/* 图片理解：气泡内缩略图与放大预览 */
+.bubble__img {
+  display: block;
+  max-width: 240px;
+  max-height: 240px;
+  margin: 4px 0;
+  border-radius: var(--radius, 10px);
+  border: 1px solid var(--color-border);
+  cursor: zoom-in;
+  object-fit: cover;
+}
+.img-preview-modal .ant-modal-content {
+  background: transparent;
+  box-shadow: none;
 }
 </style>
