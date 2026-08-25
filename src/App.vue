@@ -1,5 +1,6 @@
 <template>
-  <div class="app">
+  <a-config-provider :theme="antdTheme">
+    <div class="app">
     <aside class="sidebar">
       <button class="new-chat" @click="onNewChat">
         <Plus :size="16" />
@@ -125,12 +126,14 @@
     <main class="main">
       <RouterView />
     </main>
-  </div>
+    </div>
+  </a-config-provider>
 </template>
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRouter, useRoute } from 'vue-router'
+import { theme as antdThemeTokens } from 'ant-design-vue'
 import { Plus, Search, Settings, MessageSquare, Archive, Trash2, Sun, Moon, BarChart3 } from 'lucide-vue-next'
 import { projects, activeProjectId, removeProject, fetchProjects } from './projects.js'
 import { createSession, fetchSessions, deleteSession, archiveSession, updateSession, sessions, NO_PROJECT_KEY } from './sessions.js'
@@ -141,6 +144,21 @@ const route = useRoute()
 const keyword = ref('')
 
 const activeSessionId = computed(() => sessions.activeSessionId)
+
+// ant-design-vue 暗色主题：跟随全局 isDark 切换 darkAlgorithm
+const antdTheme = computed(() =>
+  isDark.value
+    ? {
+        algorithm: antdThemeTokens.darkAlgorithm,
+        token: {
+          colorBgContainer: '#1e293b',
+          colorBgElevated: '#1e293b',
+          colorBorder: '#334155',
+          colorBorderSecondary: '#334155',
+        },
+      }
+    : {}
+)
 
 // 暗色模式：状态持久化到 localStorage（key: agent-theme），启动时由 main.js 应用
 const isDark = ref(document.documentElement.classList.contains('dark'))
@@ -372,7 +390,7 @@ watch(
 .app {
   display: flex;
   height: 100vh;
-  background: @color-bg;
+  background: var(--color-bg);
 }
 .sidebar {
   width: 280px;

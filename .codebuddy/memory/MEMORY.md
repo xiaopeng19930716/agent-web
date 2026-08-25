@@ -47,3 +47,11 @@
 ## 关键约束（来自历史 bug）
 - MessageList.vue 编辑 `.timeline__result-body` 等样式块时，old_str 必须覆盖完整属性块，否则剩余属性会脱离选择器成裸属性导致 Less 编译报错「missing opening '{'」。
 - 工具重试按钮：仅失败工具显示（isToolFailed 正则匹配 result 文本错误/失败/拒绝/超时），放在头部状态标签「完成」左侧，文字「重试」；失败工具状态标签显示红色「失败」而非「完成」。
+
+## ⚠️ 颜色/主题强制规范（用户 2026-08-25 定）
+- **禁止在 `.vue` 组件中硬编码任何颜色值**（包括 Tailwind 的 `bg-white`/`text-gray-700`/`border-gray-200`/`bg-gray-50` 等固定浅色类，以及 Less 的 `@color-*` 之外的字面量如 `#1f1f1f`、`#141414`、`#303030` 等）。
+- 原因：主题色后续要交给**用户自定义**，硬编码会让自定义主题失效、且暗色模式不统一。
+- **只允许用项目 CSS 变量**：`--color-bg` / `--color-bg-subtle` / `--color-bg-elevated` / `--color-border` / `--color-text` / `--color-text-strong` / `--color-text-muted` / `--brand` 等（定义在 `src/assets/theme.css`，明暗两套）。
+- Tailwind 用法：用 `dark:` 变体 + 变量任意值，例：`dark:bg-[var(--color-bg-subtle)]`、`dark:border-[var(--color-border)]`、`dark:text-gray-200`（gray 灰阶作为文字层级可保留，但背景/边框等必须走变量）。
+- ant-design-vue 组件：已通过 `App.vue` 的 `a-config-provider` + `theme.darkAlgorithm` + token（`colorBgContainer:#1e293b` 等）统一暗色；不要给 antdv 组件单独加浅色背景类。
+- 之前已修过：ModelSettings / SettingsPanel / UsageStats / McpSettings / SkillsSettings 的暗色适配（背景/边框/文字全改走变量）。

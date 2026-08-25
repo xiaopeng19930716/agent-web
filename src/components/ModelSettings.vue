@@ -372,23 +372,23 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
   <div class="max-w-3xl mx-auto px-4 py-8">
     <!-- 供应商卡片 -->
     <section class="mb-8">
-      <h3 class="text-base font-semibold text-gray-700 mb-3">供应商</h3>
+      <h3 class="text-base font-semibold text-gray-700 dark:text-gray-200 mb-3">供应商</h3>
       <div class="grid grid-cols-2 gap-3 auto-rows-fr">
         <div
           v-for="v in allVendors"
           :key="v.key"
           role="button"
           tabindex="0"
-          class="group relative flex h-full items-center justify-between gap-2 rounded-xl border bg-white px-4 py-3 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md cursor-pointer"
+          class="group relative flex h-full items-center justify-between gap-2 rounded-xl border bg-white dark:bg-[var(--color-bg-subtle)] px-4 py-3 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md cursor-pointer"
           :class="[
-            activeKey === v.key ? 'border-brand ring-2 ring-brand/30' : 'border-gray-200',
+            activeKey === v.key ? 'border-brand ring-2 ring-brand/30' : 'border-gray-200 dark:border-[var(--color-border)]',
             isVendorDisabled(v.key) ? 'opacity-60' : '',
           ]"
           @click="selectVendor(v.key)"
           @keydown.enter="selectVendor(v.key)"
         >
           <div class="flex min-w-0 items-center gap-2">
-            <span class="truncate text-sm font-semibold text-gray-800">{{ v.name }}</span>
+            <span class="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{{ v.name }}</span>
             <a-badge
               v-if="isConfigured(v.key)"
               status="success"
@@ -408,7 +408,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
               v-if="v.isCustomVendor"
               type="button"
               title="删除该供应商"
-              class="inline-flex items-center justify-center w-5 h-5 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+              class="inline-flex items-center justify-center w-5 h-5 rounded text-gray-300 dark:text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors cursor-pointer"
               @click.stop="deleteCustomVendor(v.key)"
             >
               <Trash2 :size="13" />
@@ -417,7 +417,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
         </div>
         <button
           type="button"
-          class="flex h-full flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50/50 px-4 py-3 text-gray-500 transition-all duration-150 hover:border-brand hover:text-brand cursor-pointer"
+          class="flex h-full flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50/50 dark:bg-[var(--color-bg)] px-4 py-3 text-gray-500 dark:text-gray-400 transition-all duration-150 hover:border-brand hover:text-brand cursor-pointer"
           :class="activeKey === '__new__' ? 'border-brand ring-2 ring-brand/30 text-brand' : ''"
           @click="selectVendor('__new__')"
         >
@@ -428,16 +428,16 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
     </section>
 
     <!-- 配置表单 -->
-    <section class="rounded-2xl border border-gray-200 bg-white shadow-sm p-6">
+    <section class="rounded-2xl border border-gray-200 dark:border-[var(--color-border)] bg-white dark:bg-[var(--color-bg-subtle)] shadow-sm p-6">
       <div class="flex items-center justify-between mb-5">
-        <h3 class="text-lg font-semibold text-gray-800">
+        <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100">
           {{ isNew ? '新增自定义供应商' : (editing ? '编辑 · ' + activeVendor.name : '查看 · ' + activeVendor.name) }}
         </h3>
       </div>
       <div class="space-y-5">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label class="block">
-            <span class="block text-xs font-semibold text-gray-700 mb-1">供应商名称 <span class="text-red-500">*</span></span>
+            <span class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">供应商名称 <span class="text-red-500">*</span></span>
             <a-input
               v-model:value="form.name"
               placeholder="如：我的私有服务"
@@ -446,7 +446,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
             />
           </label>
           <label class="block">
-            <span class="block text-xs font-semibold text-gray-700 mb-1">供应商官网（选填）</span>
+            <span class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">供应商官网（选填）</span>
             <a-input
               v-model:value="form.website"
               placeholder="https://..."
@@ -456,17 +456,17 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
           </label>
         </div>
         <label class="block">
-          <span class="block text-xs font-semibold text-gray-700 mb-1">供应商 Key <span class="text-red-500">*</span></span>
+          <span class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">供应商 Key <span class="text-red-500">*</span></span>
           <a-input
             v-model:value="form.vendorKey"
             placeholder="如：my-llm-service（唯一标识，用于获取模型列表）"
             size="middle"
             :disabled="!editing || isPreset"
           />
-          <span class="text-[11px] text-gray-400 mt-1 block">{{ isNew ? '自定义供应商需手动填写 Key，保存后不可修改' : isPreset ? '预置供应商的 Key 与名称只读，不可修改' : '已保存的自定义供应商 Key 不可修改' }}</span>
+          <span class="text-[11px] text-gray-400 dark:text-gray-500 mt-1 block">{{ isNew ? '自定义供应商需手动填写 Key，保存后不可修改' : isPreset ? '预置供应商的 Key 与名称只读，不可修改' : '已保存的自定义供应商 Key 不可修改' }}</span>
         </label>
         <label class="block">
-          <span class="block text-xs font-semibold text-gray-700 mb-1">Base URL</span>
+          <span class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Base URL</span>
           <a-input-group compact size="middle">
             <a-select
               v-model:value="form.platform"
@@ -484,10 +484,10 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
               :disabled="!editing"
             />
           </a-input-group>
-          <span class="text-[11px] text-gray-400 mt-1 block">切换类型时，若 Base URL 为空会自动填入对应兼容模式的默认地址，也可手动修改。</span>
+          <span class="text-[11px] text-gray-400 dark:text-gray-500 mt-1 block">切换类型时，若 Base URL 为空会自动填入对应兼容模式的默认地址，也可手动修改。</span>
         </label>
         <label class="block">
-          <span class="block text-xs font-semibold text-gray-700 mb-1">API Key</span>
+          <span class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">API Key</span>
           <a-input-password
             v-model:value="form.apiKey"
             placeholder="sk-..."
@@ -497,7 +497,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
         </label>
         <div>
           <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-semibold text-gray-700">模型（名称 / ID / Max Tokens / 上下文窗口，可添加多组）</span>
+            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300">模型（名称 / ID / Max Tokens / 上下文窗口，可添加多组）</span>
             <button
               type="button"
               :disabled="!editing || fetchLoading"
@@ -560,7 +560,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
                 type="button"
                 title="删除该模型行"
                 :disabled="!editing || form.modelRows.length <= 1"
-                class="shrink-0 inline-flex items-center justify-center w-9 h-9 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                class="shrink-0 inline-flex items-center justify-center w-9 h-9 text-gray-400 dark:text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 @click="removeModelRow(i)"
               >
                 <Trash2 :size="16" />
@@ -579,7 +579,7 @@ onMounted(() => selectVendor(PRESET_VENDORS[0].key))
             </button>
             <button
               type="button"
-              class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm transition-colors cursor-pointer"
+              class="bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-[var(--color-bg-subtle)] dark:hover:bg-[var(--color-border)] dark:text-gray-200 px-4 py-2 rounded-lg text-sm transition-colors cursor-pointer"
               @click="resetDefaults"
             >
               恢复默认

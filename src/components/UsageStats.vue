@@ -146,7 +146,18 @@ const trendChart = ref(null)
 let tokenInst = null
 let callInst = null
 let trendInst = null
-const isDark = computed(() => document.documentElement.classList.contains('dark') || settings.theme === 'dark')
+const isDark = ref(document.documentElement.classList.contains('dark'))
+// 监听 html 根节点的 dark 类变化（主题切换由 App.vue 切换 class 实现），驱动图表重绘
+let themeObserver = null
+onMounted(() => {
+  themeObserver = new MutationObserver(() => {
+    isDark.value = document.documentElement.classList.contains('dark')
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+})
+onBeforeUnmount(() => {
+  if (themeObserver) themeObserver.disconnect()
+})
 
 function baseTextStyle() {
   return { color: isDark.value ? '#c9d1d9' : '#1f2328' }

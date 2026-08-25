@@ -24,10 +24,10 @@ const isActive = (key) => route.path.endsWith(`/${key}`) || route.path === `/set
   <transition name="settings-fade" appear>
     <div class="flex h-full min-h-0 flex-col">
     <!-- 顶部子菜单 -->
-    <header class="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-2">
+    <header class="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white dark:border-[var(--color-border)] dark:bg-[var(--color-bg-subtle)] px-4 py-2">
       <button
         type="button"
-        class="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-800"
+        class="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 transition-colors duration-150 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-[#303030] dark:hover:text-gray-200"
         @click="goChat"
       >
         <ArrowLeft :size="16" />
@@ -38,8 +38,8 @@ const isActive = (key) => route.path.endsWith(`/${key}`) || route.path === `/set
           v-for="item in subMenus"
           :key="item.key"
           :to="item.path"
-          class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 transition-colors duration-150 cursor-pointer no-underline"
-          :class="isActive(item.key) ? 'bg-brand text-white' : 'hover:bg-gray-100 hover:text-gray-800'"
+          class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-300 transition-colors duration-150 cursor-pointer no-underline"
+          :class="isActive(item.key) ? 'bg-brand text-white' : 'hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-[#303030] dark:hover:text-gray-200'"
         >
           <component :is="item.icon" :size="16" />
           <span>{{ item.label }}</span>
@@ -48,7 +48,7 @@ const isActive = (key) => route.path.endsWith(`/${key}`) || route.path === `/set
     </header>
 
     <!-- 下方内容区 -->
-    <div class="flex-1 min-w-0 overflow-y-auto bg-gray-50">
+    <div class="flex-1 min-w-0 overflow-y-auto bg-gray-50 dark:bg-[var(--color-bg)]">
       <router-view />
     </div>
   </div>

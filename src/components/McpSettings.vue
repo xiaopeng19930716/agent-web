@@ -296,8 +296,8 @@ async function testConnection(name) {
   <div class="max-w-4xl mx-auto px-4 py-8">
     <div class="flex items-start justify-between gap-3 mb-6">
       <div>
-        <h3 class="text-base font-semibold text-gray-700 mb-1">MCP Server</h3>
-        <p class="text-sm text-gray-500">
+        <h3 class="text-base font-semibold text-gray-700 dark:text-gray-200 mb-1">MCP Server</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400">
           配置 Agent 可调用的 MCP 服务器，测试通过后可启用。
         </p>
       </div>
@@ -314,18 +314,18 @@ async function testConnection(name) {
       <div
         v-for="s in mcpList"
         :key="s.name"
-        class="rounded-2xl border border-gray-200 bg-white shadow-sm px-4 py-3 transition-all duration-150 hover:shadow-md"
+        class="rounded-2xl border border-gray-200 dark:border-[var(--color-border)] bg-white dark:bg-[var(--color-bg-subtle)] shadow-sm px-4 py-3 transition-all duration-150 hover:shadow-md"
         :class="{ 'opacity-60': !s.enabled }"
       >
         <div class="flex items-center gap-3 flex-wrap">
           <Server :size="18" class="text-brand shrink-0" />
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
-              <span class="font-semibold text-gray-800 text-sm">{{ s.name }}</span>
+              <span class="font-semibold text-gray-800 dark:text-gray-100 text-sm">{{ s.name }}</span>
               <a-tag :color="TYPE_META[s.type].color" class="!m-0">{{ TYPE_META[s.type].label }}</a-tag>
               <a-tag v-if="!s.enabled" class="!m-0">已停用</a-tag>
             </div>
-            <div class="text-xs text-gray-500 font-mono truncate mt-0.5">{{ typeSummary(s) }}</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate mt-0.5">{{ typeSummary(s) }}</div>
           </div>
           <a-switch :checked="s.enabled" @change="(e) => toggleEnabled(s.name, e.target.checked)" />
           <a-button size="small" :loading="testStates[s.name]?.testing" @click="testConnection(s.name)">
@@ -353,7 +353,7 @@ async function testConnection(name) {
       <!-- 空态 -->
       <div
         v-if="!mcpList.length && !editOpen"
-        class="rounded-2xl border border-dashed border-gray-300 bg-white/50 px-4 py-10 text-center text-sm text-gray-400"
+        class="rounded-2xl border border-dashed border-gray-300 dark:border-[var(--color-border)] bg-white/50 dark:bg-[var(--color-bg-subtle)]/50 px-4 py-10 text-center text-sm text-gray-400 dark:text-gray-500"
       >
         还没有 MCP Server，点击下方添加或从其他 Agent 导入。
       </div>
@@ -362,7 +362,7 @@ async function testConnection(name) {
       <button
         v-if="!editOpen"
         type="button"
-        class="w-full flex flex-col items-center justify-center h-20 rounded-2xl border border-dashed border-gray-300 bg-white/50 text-gray-500 transition-all duration-150 hover:border-brand hover:text-brand cursor-pointer"
+        class="w-full flex flex-col items-center justify-center h-20 rounded-2xl border border-dashed border-gray-300 dark:border-[var(--color-border)] bg-white/50 dark:bg-[var(--color-bg-subtle)]/50 text-gray-500 dark:text-gray-400 transition-all duration-150 hover:border-brand hover:text-brand cursor-pointer"
         @click="startAdd"
       >
         <Plus :size="20" />
@@ -378,18 +378,18 @@ async function testConnection(name) {
       :footer="null"
       destroy-on-close
     >
-      <p class="text-sm text-gray-500 mb-4">
+      <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
         扫描到以下 Agent 已配置的 MCP Server，可编辑各 Agent 的配置文件路径后局部「重新扫描」，勾选需要导入的项（已存在同名项会自动跳过）。
       </p>
 
-      <div v-if="importLoading" class="py-14 flex flex-col items-center gap-3 text-gray-400">
+      <div v-if="importLoading" class="py-14 flex flex-col items-center gap-3 text-gray-400 dark:text-gray-500">
         <a-spin />
         <span class="text-sm">正在扫描本地 Agent 配置…</span>
       </div>
 
       <div
         v-else-if="importError"
-        class="rounded-2xl border border-red-200 bg-red-50 px-4 py-6 text-center text-sm text-red-600"
+        class="rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 px-4 py-6 text-center text-sm text-red-600 dark:text-red-400"
       >
         扫描失败：{{ importError }}
         <div class="mt-2">
@@ -399,7 +399,7 @@ async function testConnection(name) {
 
       <div
         v-else-if="!importSources.length && !sourceDefs.length"
-        class="rounded-2xl border border-dashed border-gray-300 bg-white/50 px-4 py-12 text-center text-sm text-gray-400"
+        class="rounded-2xl border border-dashed border-gray-300 dark:border-[var(--color-border)] bg-white/50 dark:bg-[var(--color-bg-subtle)]/50 px-4 py-12 text-center text-sm text-gray-400 dark:text-gray-500"
       >
         未发现其他 Agent 的 MCP 配置
       </div>
@@ -408,13 +408,13 @@ async function testConnection(name) {
         <div
           v-for="def in sourceDefs"
           :key="def.id"
-          class="rounded-2xl border border-gray-200 p-3 transition-colors"
-          :class="{ 'border-blue-200 bg-blue-50/30': def.isOverridden }"
+          class="rounded-2xl border border-gray-200 dark:border-[var(--color-border)] bg-white dark:bg-[var(--color-bg-subtle)] p-3 transition-colors"
+          :class="{ 'border-blue-200 dark:border-blue-900/50 bg-blue-50/30 dark:bg-blue-900/20': def.isOverridden }"
         >
           <!-- 头部：名称 + 重扫 -->
           <div class="flex items-center justify-between gap-2 mb-2">
             <div class="flex items-center gap-2.5 min-w-0">
-              <span class="font-semibold text-gray-800 text-sm">{{ def.label }}</span>
+              <span class="font-semibold text-gray-800 dark:text-gray-100 text-sm">{{ def.label }}</span>
               <a-tag v-if="def.isOverridden" color="blue" class="!m-0 !text-xs">自定义路径</a-tag>
             </div>
             <a-button size="small" :loading="rescanningId === def.id" @click="rescanAgent(def.id)">
@@ -427,13 +427,13 @@ async function testConnection(name) {
 
           <!-- 路径编辑区：MCP 自动扫描配置文件中的 Server，仅需配置配置文件路径 -->
           <div class="mb-2.5">
-            <label class="flex items-center gap-1 text-xs text-gray-500 mb-1">
+            <label class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mb-1">
               <FileText :size="12" /> MCP 配置文件路径（每行一个，自动扫描其中的 Server）
             </label>
             <textarea
               v-model="pathDrafts[def.id].configFiles"
               rows="2"
-              class="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand/40"
+              class="w-full rounded-lg border border-gray-200 dark:border-[var(--color-border)] bg-white dark:bg-[var(--color-bg)] px-2 py-1.5 text-xs text-gray-700 dark:text-gray-200 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand/40"
               placeholder="例如 C:\Users\you\.claude.json"
             ></textarea>
           </div>
@@ -451,11 +451,11 @@ async function testConnection(name) {
           </div>
 
           <!-- 已扫描的 MCP 列表 -->
-          <div class="space-y-1.5 pl-1 border-t border-gray-100 pt-2.5">
+          <div class="space-y-1.5 pl-1 border-t border-gray-100 dark:border-[var(--color-border)] pt-2.5">
             <div
               v-for="s in (importSources.find((x) => x.id === def.id)?.servers || [])"
               :key="s.name"
-              class="flex items-center gap-2.5 py-1.5 px-2 rounded-lg hover:bg-gray-50 transition-colors"
+              class="flex items-center gap-2.5 py-1.5 px-2 rounded-lg hover:bg-gray-50 dark:hover:bg-[var(--color-bg)] transition-colors"
             >
               <a-checkbox
                 :checked="selectedMcp.has(`${def.id}::${s.name}`)"
@@ -468,18 +468,18 @@ async function testConnection(name) {
               />
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
-                  <span class="text-sm font-medium text-gray-700">{{ s.name }}</span>
+                  <span class="text-sm font-medium text-gray-700 dark:text-gray-200">{{ s.name }}</span>
                   <a-tag :color="TYPE_META[s.type]?.color" class="!m-0 !text-xs">{{ TYPE_META[s.type]?.label }}</a-tag>
                   <a-tag v-if="importExisting.has(s.name)" color="default" class="!m-0 !text-xs">已存在</a-tag>
                 </div>
-                <div class="text-xs text-gray-400 font-mono truncate mt-0.5">
+                <div class="text-xs text-gray-400 dark:text-gray-500 font-mono truncate mt-0.5">
                   {{ s.type === 'local' || s.type === 'stdio' ? s.command : s.url }}
                 </div>
               </div>
             </div>
             <p
               v-if="!(importSources.find((x) => x.id === def.id)?.servers || []).length"
-              class="text-xs text-gray-400 px-2 py-1"
+              class="text-xs text-gray-400 dark:text-gray-500 px-2 py-1"
             >
               该 Agent 未扫描到 MCP Server（可编辑路径后重新扫描）
             </p>
@@ -487,7 +487,7 @@ async function testConnection(name) {
         </div>
       </div>
 
-      <div v-if="!importLoading && importSources.length" class="flex items-center justify-end gap-2 mt-5 pt-4 border-t border-gray-100">
+      <div v-if="!importLoading && importSources.length" class="flex items-center justify-end gap-2 mt-5 pt-4 border-t border-gray-100 dark:border-[var(--color-border)]">
         <a-button @click="importOpen = false">取消</a-button>
         <a-button type="primary" :disabled="!selectedMcpCount" @click="importSelectedMcp">
           导入所选（{{ selectedMcpCount }}）
@@ -506,23 +506,23 @@ async function testConnection(name) {
     >
       <div class="space-y-4 pt-1">
         <div>
-          <span class="block text-xs font-semibold text-gray-700 mb-1">名称 <span class="text-red-500">*</span></span>
+          <span class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">名称 <span class="text-red-500">*</span></span>
           <a-input v-model:value="form.name" placeholder="如：filesystem / fetch" />
         </div>
         <div>
-          <span class="block text-xs font-semibold text-gray-700 mb-1">类型</span>
+          <span class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">类型</span>
           <a-select v-model:value="form.type" :options="TYPE_OPTIONS" class="w-full" />
         </div>
         <div v-if="form.type === 'local'">
-          <span class="block text-xs font-semibold text-gray-700 mb-1">启动命令 <span class="text-red-500">*</span></span>
+          <span class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">启动命令 <span class="text-red-500">*</span></span>
           <a-input v-model:value="form.command" placeholder="如：npx @modelcontextprotocol/server-filesystem ./data" />
         </div>
         <div v-else>
-          <span class="block text-xs font-semibold text-gray-700 mb-1">服务器 URL <span class="text-red-500">*</span></span>
+          <span class="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">服务器 URL <span class="text-red-500">*</span></span>
           <a-input v-model:value="form.url" placeholder="https://..." />
         </div>
         <div class="flex items-center justify-between">
-          <span class="text-xs font-semibold text-gray-700">启用</span>
+          <span class="text-xs font-semibold text-gray-700 dark:text-gray-300">启用</span>
           <a-switch v-model:checked="form.enabled" />
         </div>
         <div v-if="formError" class="text-sm text-red-500">{{ formError }}</div>
