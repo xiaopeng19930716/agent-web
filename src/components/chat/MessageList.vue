@@ -3,7 +3,7 @@ import { ref, reactive, computed, nextTick, watch, onMounted } from 'vue'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
-import { ChevronDown, ChevronUp, Check, Loader2, Copy, ArrowDown, Undo2, Redo2, User } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Check, Loader2, Copy, ArrowDown, Undo2, Redo2, Timer, User } from 'lucide-vue-next'
 
 marked.setOptions({
   highlight(code, lang) {
@@ -332,6 +332,14 @@ onMounted(updateToBottom)
           >
             <Redo2 :size="14" />
           </button>
+                <span
+                  v-if="m.metadata && typeof m.metadata.firstTokenMs === 'number'"
+                  class="bubble__latency"
+                  :title="`首 token 延迟 ${m.metadata.firstTokenMs}ms`"
+                >
+                  <Timer :size="12" />
+                  {{ (m.metadata.firstTokenMs / 1000).toFixed(1) }}s
+                </span>
         </div>
       </div>
       <div v-if="error" class="chat__error">{{ error }}</div>
@@ -536,6 +544,22 @@ onMounted(updateToBottom)
 .msg__action:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+/* 首 token 延迟标签 */
+.bubble__latency {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 2px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1;
+  color: @color-text-muted;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid @color-border;
+  user-select: none;
+  white-space: nowrap;
 }
 /* 工具时间线里的「还原」按钮复用 .bubble__iconbtn，沿用原来的小尺寸样式 */
 .bubble__iconbtn {

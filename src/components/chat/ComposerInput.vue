@@ -233,8 +233,14 @@ function onCmdInput() {
   }
 }
 
-// 键盘处理：优先 @ 文件面板，其次 / 命令面板
+// 键盘处理：优先 Cmd/Ctrl+Enter 发送，其次 Shift+Enter 换行，再处理 @ / 面板
 function onCmdKeydown(e) {
+  // Cmd/Ctrl+Enter 发送（Mac 用 metaKey，Windows/Linux 用 ctrlKey）
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    triggerSend();
+    return;
+  }
   if (e.key === "Enter" && e.shiftKey) {
     e.preventDefault();
     insertNewline(composerEl.value);
@@ -351,10 +357,9 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
         class="chat__input-composer"
         ref="composerEl"
         contenteditable="true"
-        data-placeholder="输入消息，@ 引用文件/目录，/ 选择工具…"
+        data-placeholder="输入消息，@ 引用文件/目录，/ 选择工具…（⌘/Ctrl+Enter 发送）"
         @input="onCmdInput"
         @keydown="onCmdKeydown"
-        @keydown.enter.exact.prevent="triggerSend"
         @paste="onPaste"
       ></div>
 

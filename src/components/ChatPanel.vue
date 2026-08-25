@@ -321,6 +321,8 @@ async function runAssistantTurn(session, options = {}) {
 
   // 工具调用时间线：按 id/name 维护进行中的条目
   const toolRunById = new Map()
+  const turnStart = Date.now() // 请求发起时刻，用于计算首 token 延迟
+  let firstTokenMs = null // 首个 content 字符到达耗时（毫秒），null 表示未收到
 
   await streamChat(finalHistory, {
     config: {
@@ -371,6 +373,8 @@ async function runAssistantTurn(session, options = {}) {
       }
     },
     onDelta: (delta) => {
+      // 首次收到正文：记录首 token 延迟（请求发起 → 首个 content 字符）
+      if (firstTokenMs === null) firstTokenMs = Date.now() - turnStart
       // 进入正式回复：思考阶段结束，收起思考区
       if (!assistant.reasoningDone && assistant.reasoning) assistant.reasoningDone = true
       assistant.content += delta
@@ -385,6 +389,7 @@ async function runAssistantTurn(session, options = {}) {
         model: meta?.model || modelId,
         tokens: meta?.tokens ?? null,
         durationMs: meta?.durationMs ?? null,
+        firstTokenMs, // 首 token 延迟（请求发起→首个正文）
         status: meta?.status || 'ok',
       }
       // 首条消息作为标题 + 落盘
@@ -402,6 +407,7 @@ async function runAssistantTurn(session, options = {}) {
         model: modelId,
         tokens: null,
         durationMs: null,
+        firstTokenMs,
         status: 'error',
       }
       loading.value = false
