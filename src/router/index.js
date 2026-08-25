@@ -33,6 +33,11 @@ const routes = [
       },
     ],
   },
+  {
+    path: '/usage',
+    name: 'usage',
+    component: () => import('../components/UsageStats.vue'),
+  },
   { path: '/:pathMatch(.*)*', redirect: '/chat' },
 ]
 

@@ -107,6 +107,10 @@
       </nav>
 
       <div class="sidebar__footer">
+        <RouterLink to="/usage" class="footer-setting">
+          <BarChart3 :size="16" />
+          <span>用量</span>
+        </RouterLink>
         <button class="footer-setting" type="button" @click="toggleTheme">
           <component :is="isDark ? Sun : Moon" :size="16" />
           <span>{{ isDark ? '亮色模式' : '暗色模式' }}</span>
@@ -127,7 +131,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRouter, useRoute } from 'vue-router'
-import { Plus, Search, Settings, MessageSquare, Archive, Trash2, Sun, Moon } from 'lucide-vue-next'
+import { Plus, Search, Settings, MessageSquare, Archive, Trash2, Sun, Moon, BarChart3 } from 'lucide-vue-next'
 import { projects, activeProjectId, removeProject, fetchProjects } from './projects.js'
 import { createSession, fetchSessions, deleteSession, archiveSession, updateSession, sessions, NO_PROJECT_KEY } from './sessions.js'
 import { emitBus } from './bus.js'
