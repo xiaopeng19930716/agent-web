@@ -1,77 +1,136 @@
 // 调用本地后端，后端再流式转发百炼云
+// 支持 SSE 断流自动重连（#11）：网络中断时按指数退避重试，最多 maxRetries 次；
+// 重连前通过 onReset 清空本地已累积的半成品，避免重复内容；onReconnecting 用于 UI 提示。
 export async function streamChat(
   messages,
-  { config, projectId, permission, effort, tools, skills, mcpServers, sessionId, onDelta, onReasoning, onToolCall, onToolConfirm, onTodoUpdate, onDone, onError } = {}
+  {
+    config,
+    projectId,
+    permission,
+    effort,
+    tools,
+    skills,
+    mcpServers,
+    sessionId,
+    maxRetries = 3,
+    onDelta,
+    onReasoning,
+    onToolCall,
+    onToolConfirm,
+    onTodoUpdate,
+    onDone,
+    onError,
+    onReconnecting,
+    onReset,
+  } = {}
 ) {
-  try {
-    const resp = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, config, projectId, permission, effort, tools, skills, mcpServers, sessionId }),
-    })
+  // 单次流式请求：返回 'done' | 'error' | 'dropped'
+  // 'done'   —— 正常收到 [DONE]
+  // 'error'  —— 业务/HTTP 错误（不应重连，直接结束）
+  // 'dropped'—— 流意外中断（未收到 [DONE]），可重连
+  async function runOnce() {
+    let resp
+    try {
+      resp = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages, config, projectId, permission, effort, tools, skills, mcpServers, sessionId }),
+      })
+    } catch (err) {
+      // 网络层失败（连接被拒 / 断网）：视为断流，交给外层重连
+      return { result: 'dropped', error: String(err) }
+    }
 
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}))
-      onError?.(err.error || `请求失败: ${resp.status}`)
-      return
+      return { result: 'error', error: err.error || `请求失败: ${resp.status}` }
     }
 
     const reader = resp.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
     let meta = null
+    let finished = false
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
 
-      // 按 SSE 行解析：data: {...}\n\n
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop() || ''
+        // 按 SSE 行解析：data: {...}\n\n
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() || ''
 
-      for (const part of parts) {
-        const line = part.trim()
-        if (!line.startsWith('data:')) continue
-        const data = line.slice(5).trim()
-        if (data === '[DONE]') {
-          onDone?.(meta)
-          return
-        }
-        try {
-          const json = JSON.parse(data)
-          if (json.error) {
-            onError?.(json.error)
-            return
+        for (const part of parts) {
+          const line = part.trim()
+          if (!line.startsWith('data:')) continue
+          const data = line.slice(5).trim()
+          if (data === '[DONE]') {
+            finished = true
+            onDone?.(meta)
+            return { result: 'done' }
           }
-          if (json.type === 'meta') {
-            meta = json
-            continue
+          try {
+            const json = JSON.parse(data)
+            if (json.error) {
+              return { result: 'error', error: json.error }
+            }
+            if (json.type === 'meta') {
+              meta = json
+              continue
+            }
+            if (json.type === 'tool_call') {
+              onToolCall?.(json)
+              continue
+            }
+            if (json.type === 'tool_confirm') {
+              onToolConfirm?.(json)
+              continue
+            }
+            if (json.type === 'todo_update') {
+              onTodoUpdate?.(json.todos)
+              continue
+            }
+            const delta = json.choices?.[0]?.delta?.content || ''
+            if (delta) onDelta?.(delta)
+            const reasoning = json.choices?.[0]?.delta?.reasoning || ''
+            if (reasoning) onReasoning?.(reasoning)
+          } catch {
+            // 忽略不完整 JSON
           }
-          if (json.type === 'tool_call') {
-            onToolCall?.(json)
-            continue
-          }
-          if (json.type === 'tool_confirm') {
-            onToolConfirm?.(json)
-            continue
-          }
-          if (json.type === 'todo_update') {
-            onTodoUpdate?.(json.todos)
-            continue
-          }
-          const delta = json.choices?.[0]?.delta?.content || ''
-          if (delta) onDelta?.(delta)
-          const reasoning = json.choices?.[0]?.delta?.reasoning || ''
-          if (reasoning) onReasoning?.(reasoning)
-        } catch {
-          // 忽略不完整 JSON
         }
       }
+    } catch (err) {
+      // 读取过程中断流（未收到 [DONE]）：可重连
+      return { result: 'dropped', error: String(err) }
     }
-    onDone?.(meta)
-  } catch (err) {
-    onError?.(String(err))
+
+    // 流自然结束但未收到 [DONE]：视为断流
+    if (!finished) return { result: 'dropped', error: 'stream ended without [DONE]' }
+    return { result: 'done' }
+  }
+
+  let attempt = 0
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { result, error } = await runOnce()
+    if (result === 'done') return
+    if (result === 'error') {
+      onError?.(error)
+      return
+    }
+    // dropped —— 尝试重连
+    if (attempt >= maxRetries) {
+      onError?.(`连接不稳定，已自动重试 ${maxRetries} 次仍失败，请检查网络后重试`)
+      return
+    }
+    attempt += 1
+    const delay = Math.min(1000 * 2 ** (attempt - 1), 8000) // 1s, 2s, 4s ... 上限 8s
+    onReconnecting?.(attempt, delay, maxRetries)
+    // 重连前清空本地累积的半成品，避免重复内容
+    onReset?.()
+    await new Promise((r) => setTimeout(r, delay))
   }
 }
 

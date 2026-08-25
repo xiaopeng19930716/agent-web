@@ -36,6 +36,9 @@ import { confirmToolCall, abortChat } from '../api/agent.js'
 
 const error = ref('')
 const loading = ref(false)
+// #11 SSE 断流重连状态：显示「连接中断，正在重连…」
+const reconnecting = ref(false)
+const reconnectInfo = ref({ attempt: 0, max: 0 })
 
 // 「需确认(ask)」模式：后端暂停高风险工具，等待用户允许/拒绝；保存当前待确认的工具调用
 const toolConfirm = ref(null)
@@ -419,6 +422,7 @@ async function runAssistantTurn(session, options = {}) {
     },
     onError: (msg) => {
       error.value = msg
+      reconnecting.value = false
       assistant.reasoningDone = true
       assistant.done = true
       assistant.metadata = {
@@ -431,7 +435,22 @@ async function runAssistantTurn(session, options = {}) {
       }
       loading.value = false
     },
+    // #11 SSE 断流自动重连：UI 提示 + 本地缓冲重置
+    onReconnecting: (attempt, delay, max) => {
+      error.value = ''
+      reconnecting.value = true
+      reconnectInfo.value = { attempt, max }
+    },
+    onReset: () => {
+      // 重连前清空已累积的半成品，模型会从头重新生成，避免内容重复
+      assistant.content = ''
+      assistant.reasoning = prevReasoning
+      assistant.reasoningDone = false
+      assistant.toolCalls = []
+      firstTokenMs = null
+    },
   })
+  reconnecting.value = false
 }
 
 // ── 对话级回退 ───────────────────────────────────────────────
@@ -631,6 +650,10 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
 
     <div class="chat__body" :style="{ gridTemplateColumns: gridCols }">
       <div class="chat__conversation">
+        <div v-if="reconnecting" class="reconnect-bar">
+          <span class="reconnect-bar__dot" />
+          连接中断，正在重连（第 {{ reconnectInfo.attempt }} / {{ reconnectInfo.max }} 次）…
+        </div>
         <MessageList ref="msgListRef" :messages="currentMessages" :active="active" :error="error" :project-id="activeProjectId.id || ''" @rollback="rollbackTo" @regenerate="regenerate" @retryTool="onRetryTool" />
         <ComposerInput
           ref="composerRef"
@@ -857,5 +880,28 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 6px;
+}
+.reconnect-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-radius: 8px;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+.reconnect-bar__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand);
+  animation: reconnect-pulse 1s ease-in-out infinite;
+}
+@keyframes reconnect-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 </style>
