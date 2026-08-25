@@ -2115,9 +2115,52 @@
   {
     "id": "s_mt77ezopt43k",
     "projectId": "p_mt707sl0b47b",
-    "title": "新对话",
-    "messages": [],
+    "title": "在当前目录下添加一个a.txt 内容为a",
+    "messages": [
+      {
+        "id": "m_mt82qjejmvcs85",
+        "role": "user",
+        "content": "在当前目录下添加一个a.txt 内容为a",
+        "tags": [
+          {
+            "type": "text",
+            "text": "在当前目录下添加一个a.txt 内容为a"
+          }
+        ],
+        "metadata": {
+          "timestamp": 1787626624699
+        }
+      },
+      {
+        "id": "m_mt82qjek0gwp2u",
+        "role": "assistant",
+        "content": "已在当前目录下创建 `a.txt`，内容为 `a`。",
+        "reasoning": "用户要求在当前目录下创建一个 a.txt 文件，内容为 \"a\"。这是一个简单的文件创建任务，直接使用 writeFile 工具即可。好的，文件已经成功写入。\n",
+        "reasoningDone": true,
+        "done": true,
+        "showThinking": true,
+        "toolCalls": [
+          {
+            "name": "writeFile",
+            "args": {
+              "filePath": "a.txt",
+              "content": "a"
+            },
+            "status": "done",
+            "result": "已写入: a.txt | backupId= | created=1"
+          }
+        ],
+        "metadata": {
+          "timestamp": 1787626627583,
+          "model": "Alibaba/qwen3.7-plus-2026-05-26",
+          "tokens": 6026,
+          "durationMs": 2843,
+          "firstTokenMs": 2654,
+          "status": "ok"
+        }
+      }
+    ],
     "createdAt": 1787574017833,
-    "updatedAt": 1787574017833
+    "updatedAt": 1787626627589
   }
 ]

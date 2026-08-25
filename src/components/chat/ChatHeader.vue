@@ -1,11 +1,14 @@
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, computed } from 'vue'
+import { GitCompare } from 'lucide-vue-next'
 import { updateSession } from '../../sessions.js'
 
 const props = defineProps({
   activeSession: { type: Object, default: null },
+  projectId: { type: String, default: '' },
+  showChanges: { type: Boolean, default: false },
 })
-const emit = defineEmits(['open-log'])
+const emit = defineEmits(['open-log', 'update:show-changes'])
 
 const editingTitle = ref(false)
 const titleDraft = ref('')
@@ -59,6 +62,15 @@ function cancelRename() {
       @dblclick="startRenameTitle"
     >{{ activeSession.title || '新对话' }}</span>
     <a-button
+      class="chat__changes-btn"
+      size="small"
+      :type="showChanges ? 'primary' : 'default'"
+      @click="emit('update:show-changes', !showChanges)"
+    >
+      <template #icon><GitCompare :size="14" /></template>
+      查看变更
+    </a-button>
+    <a-button
       class="chat__log-btn"
       size="small"
       @click="emit('open-log')"
@@ -75,6 +87,9 @@ function cancelRename() {
   flex-shrink: 0;
 }
 .chat__log-btn {
+  margin-left: 8px;
+}
+.chat__changes-btn {
   margin-left: auto;
 }
 .chat__titlebar-text {

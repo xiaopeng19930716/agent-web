@@ -28,27 +28,6 @@ function onEdit(m) {
   emit('rollback', m)
 }
 
-// 文件回退：从工具结果里解析出 backupId（写/编辑工具会在结果中附带 | backupId=...）
-function extractBackupId(result) {
-  if (typeof result !== 'string') return null
-  const m = result.match(/backupId=(.+?)(?:\s*$)/)
-  return m ? m[1].trim() : null
-}
-
-// 仅写/编辑类工具且成功备份后才提供「还原」入口
-function canRestore(t) {
-  return (
-    t.status === 'done' &&
-    (t.name === 'writeFile' || t.name === 'editFile') &&
-    extractBackupId(t.result) !== null
-  )
-}
-
-function onRestore(t) {
-  const backupId = extractBackupId(t.result)
-  if (!backupId) return
-  emit('restore', { projectId: props.projectId, backupPath: backupId })
-}
 function onRegenerate(m) {
   emit('regenerate', m)
 }
@@ -274,18 +253,6 @@ onMounted(updateToBottom)
                             {{ resultExpanded.has(resultKey(i, ti)) ? '收起结果' : '查看结果' }}
                           </span>
                           <pre v-show="resultExpanded.has(resultKey(i, ti))" class="timeline__result-body">{{ clip(t.result, 1200) }}</pre>
-                        </div>
-                        <div v-if="canRestore(t)" class="timeline__restore">
-                          <button
-                            class="bubble__iconbtn"
-                            type="button"
-                            title="还原此文件改动（恢复到被修改前的备份）"
-                            aria-label="还原文件"
-                            @click="onRestore(t)"
-                          >
-                            <Undo2 :size="14" />
-                            <span>还原</span>
-                          </button>
                         </div>
                       </div>
                     </li>
@@ -866,19 +833,6 @@ onMounted(updateToBottom)
   overflow: auto;
   white-space: pre-wrap;
   font-family: 'Fira Code', Consolas, monospace;
-}
-/* 文件回退：写/编辑工具结果下的「还原」入口 */
-.timeline__restore {
-  margin-top: 6px;
-}
-.timeline__restore .bubble__iconbtn {
-  border-color: @color-border;
-  color: @color-text-muted;
-}
-.timeline__restore .bubble__iconbtn:hover:not(:disabled) {
-  background: rgba(91, 140, 255, 0.12);
-  border-color: @color-primary;
-  color: @color-primary;
 }
 
 .chat__error {

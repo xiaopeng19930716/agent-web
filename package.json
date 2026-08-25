@@ -17,6 +17,7 @@
     "@langchain/openai": "^1.5.8",
     "@modelcontextprotocol/client": "^2.0.0",
     "ant-design-vue": "^4.2.6",
+    "diff": "^7.0.0",
     "highlight.js": "^11.9.0",
     "langchain": "^1.5.9",
     "lucide-vue-next": "^0.577.0",

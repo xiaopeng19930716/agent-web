@@ -8,7 +8,6 @@ import {
   setActiveProject,
   fetchProjects,
 } from '../projects.js'
-import { restoreFile, restoreBatch } from '../api/restore.js'
 import {
   sessions,
   NO_PROJECT_KEY,
@@ -28,6 +27,7 @@ import { onBus, emitBus } from '../bus.js'
 import ChatLogDrawer from './ChatLogDrawer.vue'
 import ChatHeader from './chat/ChatHeader.vue'
 import MessageList from './chat/MessageList.vue'
+import SessionChanges from './chat/SessionChanges.vue'
 import ComposerInput from './chat/ComposerInput.vue'
 import AddProjectModal from './chat/AddProjectModal.vue'
 import { confirmToolCall, abortChat } from '../api/agent.js'
@@ -79,6 +79,8 @@ const activeSession = computed(() =>
 const currentMessages = computed(() => activeSession.value?.messages || [])
 
 const showLog = ref(false)
+// 是否展示右侧「文件变更」面板（头部「查看变更」按钮切换）
+const showChanges = ref(false)
 const showAdd = ref(false)
 const router = useRouter()
 
@@ -524,23 +526,6 @@ async function regenerate(msg) {
   })
 }
 
-// 文件回退：把一次写/编辑操作前的自动备份还原回原文件
-async function restoreFileHandler(payload) {
-  if (loading.value) return
-  const projectId = payload.projectId || activeProjectId.id || ''
-  try {
-    const r = await restoreFile(projectId, payload.backupPath)
-    if (r.ok) {
-      error.value = ''
-      alert('已还原文件：' + r.restored)
-    } else {
-      error.value = r.error || '还原失败'
-    }
-  } catch (e) {
-    error.value = '还原失败: ' + (e.message || String(e))
-  }
-}
-
 // 切换项目
 async function init() {
   // 左侧对话框仅加载未归档会话（archived=0）
@@ -556,20 +541,40 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
 
 <template>
   <div class="chat">
-    <ChatHeader :active-session="activeSession" @open-log="showLog = true" />
-
-    <MessageList :messages="currentMessages" :active="active" :error="error" :project-id="activeProjectId.id || ''" @rollback="rollbackTo" @regenerate="regenerate" @restore="restoreFileHandler" />
-
-    <ComposerInput
-      ref="composerRef"
-      :active="active"
-      :loading="loading"
-      :available-skills="availableSkills"
-      @send="send"
-      @stop="stopGeneration"
-      @open-add="openAdd"
-      @new-project-chat="newProjectChat"
+    <ChatHeader
+      :active-session="activeSession"
+      :project-id="activeProjectId.id || ''"
+      :show-changes="showChanges"
+      @open-log="showLog = true"
+      @update:show-changes="showChanges = $event"
     />
+
+    <div class="chat__body" :class="{ 'chat__body--with-changes': showChanges }">
+      <div class="chat__conversation">
+        <MessageList :messages="currentMessages" :active="active" :error="error" :project-id="activeProjectId.id || ''" @rollback="rollbackTo" @regenerate="regenerate" />
+        <ComposerInput
+          ref="composerRef"
+          :active="active"
+          :loading="loading"
+          :available-skills="availableSkills"
+          @send="send"
+          @stop="stopGeneration"
+          @open-add="openAdd"
+          @new-project-chat="newProjectChat"
+        />
+      </div>
+
+      <!-- 右侧「文件变更」展示区：与 sidebar 平级，按屏幕宽度百分比显示 -->
+      <div class="chat__changes-wrap">
+        <transition name="changes-fade">
+          <SessionChanges
+            v-if="showChanges"
+            :session="activeSession"
+            :project-id="activeProjectId.id || ''"
+          />
+        </transition>
+      </div>
+    </div>
 
     <AddProjectModal
       :show="showAdd"
@@ -612,5 +617,42 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+/* 头部之下的主体：左侧会话区 + 右侧变更面板，grid 列宽平滑过渡 */
+.chat__body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 0px;
+  transition: grid-template-columns 0.28s cubic-bezier(0.22, 0.61, 0.36, 1);
+  min-height: 0;
+}
+.chat__body--with-changes {
+  grid-template-columns: 1fr 32vw;
+}
+/* 会话区本身纵向排布：消息列表在上，输入框在下 */
+.chat__conversation {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+/* 右侧变更区包裹：列宽由 grid 控制，溢出隐藏以便收起 */
+.chat__changes-wrap {
+  overflow: hidden;
+  min-width: 0;
+  display: flex;
+}
+/* 变更区内部淡入，避免内容瞬间出现 */
+.changes-fade-enter-active,
+.changes-fade-leave-active {
+  transition: opacity 0.24s ease;
+}
+.changes-fade-enter-from,
+.changes-fade-leave-to {
+  opacity: 0;
+}
+.changes-fade-enter-to,
+.changes-fade-leave-from {
+  opacity: 1;
 }
 </style>

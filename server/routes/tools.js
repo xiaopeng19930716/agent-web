@@ -1,7 +1,8 @@
 import os from 'os'
+import fs from 'fs'
 import { Router } from 'express'
 import { projects } from '../lib/store.js'
-import { getToolCatalog, restoreBackup, deleteFileSafe } from '../lib/fileTools.js'
+import { getToolCatalog, restoreBackup, deleteFileSafe, safeResolve } from '../lib/fileTools.js'
 
 const router = Router()
 
@@ -62,6 +63,42 @@ router.post('/restore-batch', (req, res) => {
     res.json({ ok: true, results })
   } catch (e) {
     res.status(400).json({ error: '批量还原失败: ' + (e.message || String(e)) })
+  }
+})
+
+// 读取「当前」文件内容（只读，不还原），供 diff 预览对比改动后状态。
+// query: { projectId, rel }；rel 为相对项目根路径。
+router.get('/file-content', (req, res) => {
+  try {
+    const { projectId, rel } = req.query
+    if (!rel || typeof rel !== 'string') return res.status(400).json({ error: '缺少 rel' })
+    const root = projectId && projects.get(projectId) ? projects.get(projectId).path : os.homedir()
+    const full = safeResolve(root, rel)
+    if (!fs.existsSync(full)) return res.status(404).json({ error: '文件不存在: ' + rel })
+    const content = fs.readFileSync(full, 'utf-8')
+    res.json({ ok: true, content })
+  } catch (e) {
+    res.status(400).json({ error: '读取文件失败: ' + (e.message || String(e)) })
+  }
+})
+
+// 读取「改动前」的备份文件内容（只读，不还原），供 diff 预览对比改动前状态。
+// query: { projectId, backupPath }；backupPath 形如 .agent-backup/<相对路径>.<时间戳>
+router.get('/backup-content', (req, res) => {
+  try {
+    const { projectId, backupPath } = req.query
+    if (!backupPath || typeof backupPath !== 'string') return res.status(400).json({ error: '缺少 backupPath' })
+    const normalized = backupPath.replace(/\\/g, '/').replace(/^\/+/, '')
+    if (!normalized.startsWith('.agent-backup/')) {
+      return res.status(400).json({ error: '非法备份路径: ' + backupPath })
+    }
+    const root = projectId && projects.get(projectId) ? projects.get(projectId).path : os.homedir()
+    const full = safeResolve(root, normalized)
+    if (!fs.existsSync(full)) return res.status(404).json({ error: '备份不存在或已清理: ' + backupPath })
+    const content = fs.readFileSync(full, 'utf-8')
+    res.json({ ok: true, content })
+  } catch (e) {
+    res.status(400).json({ error: '读取备份失败: ' + (e.message || String(e)) })
   }
 })
 

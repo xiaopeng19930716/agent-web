@@ -274,3 +274,29 @@ export async function summarizeChat({ messages, config }) {
     return { summary: '', error: String(err) }
   }
 }
+
+// 读取当前文件内容（供 diff 预览：改动后状态）
+export async function fetchFileContent(projectId, rel) {
+  try {
+    const url = `/api/file-content?projectId=${encodeURIComponent(projectId || '')}&rel=${encodeURIComponent(rel)}`
+    const resp = await fetch(url)
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) return { content: null, error: data.error || `请求失败: ${resp.status}` }
+    return { content: data.content ?? '', error: '' }
+  } catch (err) {
+    return { content: null, error: String(err) }
+  }
+}
+
+// 读取改动前的备份文件内容（供 diff 预览：改动前状态）
+export async function fetchBackupContent(projectId, backupPath) {
+  try {
+    const url = `/api/backup-content?projectId=${encodeURIComponent(projectId || '')}&backupPath=${encodeURIComponent(backupPath)}`
+    const resp = await fetch(url)
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) return { content: null, error: data.error || `请求失败: ${resp.status}` }
+    return { content: data.content ?? '', error: '' }
+  } catch (err) {
+    return { content: null, error: String(err) }
+  }
+}
