@@ -1,8 +1,8 @@
 <script setup>
 import { ref, reactive, computed } from 'vue'
-import { createPatch } from 'diff'
 import { GitCompare, Loader2, ChevronLeft } from 'lucide-vue-next'
 import { fetchFileContent, fetchBackupContent } from '../../api/agent.js'
+import { buildDiffRows } from '../../utils/diff.js'
 
 const props = defineProps({
   session: { type: Object, default: null },
@@ -53,7 +53,7 @@ function selectChange(item) {
     .then(([beforeRes, afterRes]) => {
       if (beforeRes.error) throw new Error(beforeRes.error)
       if (afterRes.error) throw new Error(afterRes.error)
-      buildPatch(item.filePath, beforeRes.content ?? '', afterRes.content ?? '')
+      state.patch = buildDiffRows(item.filePath, beforeRes.content ?? '', afterRes.content ?? '')
     })
     .catch((e) => {
       state.error = '加载改动失败: ' + (e && e.message ? e.message : String(e))
@@ -61,27 +61,6 @@ function selectChange(item) {
     .finally(() => {
       state.loading = false
     })
-}
-
-function buildPatch(filePath, before, after) {
-  const patchText = createPatch(filePath, before || '', after || '', '改动前', '改动后', { context: 3 })
-  const lines = patchText.split('\n')
-  const rows = []
-  let inHunk = false
-  for (const line of lines) {
-    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('Index:') || line.startsWith('===')) continue
-    if (line.startsWith('@@')) {
-      inHunk = true
-      rows.push({ type: 'hunk', text: line })
-      continue
-    }
-    if (!inHunk) continue
-    if (line.startsWith('+')) rows.push({ type: 'add', text: line.slice(1) })
-    else if (line.startsWith('-')) rows.push({ type: 'del', text: line.slice(1) })
-    else if (line.startsWith(' ')) rows.push({ type: 'ctx', text: line.slice(1) })
-    else rows.push({ type: 'ctx', text: line })
-  }
-  state.patch = rows
 }
 </script>
 

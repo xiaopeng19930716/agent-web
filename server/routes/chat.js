@@ -8,6 +8,7 @@ import { loadMcpTools } from '../lib/mcpClient.js'
 import {
   buildChatModel,
   runAgent,
+  runSingleTool,
   toLangchainMessage,
   TokenStatsHandler,
   buildEffortHint,
@@ -36,7 +37,7 @@ class ConfirmGate {
     this.pending = new Map() // id -> { resolve, timer }
     this.closed = false
   }
-  ask(id, name, args) {
+  ask(id, name, args, preview) {
     if (this.closed) return Promise.resolve('deny')
     return new Promise((resolve) => {
       // 超时自动拒绝，避免连接挂死（5 分钟）
@@ -46,7 +47,7 @@ class ConfirmGate {
       }, 5 * 60 * 1000)
       this.pending.set(id, { resolve, timer })
       this.res.write(
-        `data: ${JSON.stringify({ type: 'tool_confirm', id, name, args })}\n\n`
+        `data: ${JSON.stringify({ type: 'tool_confirm', id, name, args, preview: preview || null })}\n\n`
       )
     })
   }
@@ -88,6 +89,49 @@ router.post('/chat/abort', (req, res) => {
   const ctrl = sessionId && abortControllers.get(sessionId)
   if (ctrl) ctrl.abort()
   res.json({ ok: !!ctrl })
+})
+
+// #10 工具调用单条重试：用原始 name/args 重新执行某条工具，把 start/end 事件通过 SSE 推回前端。
+// 不复用模型、不回写会话消息（前端持有状态并原地替换该 tool 节点结果）。
+// ask 模式下仍会触发确认弹窗（复用 #8 的 diff 预览）。
+router.post('/chat/retry-tool', async (req, res) => {
+  const { projectId, permission, name, args, sessionId } = req.body || {}
+  if (!name || !args) {
+    res.status(400).json({ error: '缺少 name 或 args' })
+    return
+  }
+  // 权限：read-only / full / ask / none；默认 full
+  let perm = 'full'
+  if (permission === 'read-only' || permission === 'none') perm = permission
+  else if (permission === 'ask') perm = 'ask'
+  // 文件工具安全边界：有项目用项目根，无项目用服务端工作目录（与 /chat 一致）
+  const projectRoot = resolveProjectRoot(projectId, res)
+  if (projectRoot === null && projectId) return
+  const toolRoot = projectRoot || process.cwd()
+
+  setupSSE(res)
+  // ask 模式：建立确认闸门，复用 #8 逻辑（含 5 分钟超时自动拒绝）
+  let confirmGate = null
+  if (perm === 'ask') {
+    confirmGate = new ConfirmGate(sessionId, res)
+    if (sessionId) gatesBySession.set(sessionId, confirmGate)
+  }
+  res.on('close', () => {
+    if (confirmGate) {
+      confirmGate.close()
+      if (sessionId) gatesBySession.delete(sessionId)
+    }
+  })
+
+  try {
+    const result = await runSingleTool({ toolRoot, permission: perm, name, args, res, confirmGate, abortSignal: null })
+    res.write(`data: ${JSON.stringify({ type: 'tool_retry_done', name, ok: !/错误|拒绝/.test(result) })}\n\n`)
+  } catch (e) {
+    res.write(`data: ${JSON.stringify({ type: 'tool_retry_done', name, ok: false, error: String(e.message || e) })}\n\n`)
+  } finally {
+    res.write('data: [DONE]\n\n')
+    res.end()
+  }
 })
 
 // 上下文压缩：把早期对话压缩为摘要（独立于主对话，非流式），

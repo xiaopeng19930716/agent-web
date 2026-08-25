@@ -455,3 +455,49 @@ export function getToolCatalog() {
     ]
   }
 }
+
+// 预览「需确认(ask)」模式下高风险文件工具的最终改动（不落盘）。
+// 在 confirmGate.ask() 前调用，把 before/after 随 tool_confirm 事件推给前端渲染 diff。
+// 返回：
+//   { before, after }                             写/编辑类工具，可预览
+//   { previewError: '匹配失败，无法预览' }        editFile 的 oldStr 未命中
+//   null                                          非文件写工具（executeCommand 等走纯文本确认）
+// 任何读取/解析异常都吞掉并返回 null，避免阻塞确认流程（前端降级为纯参数文本）。
+export function previewFileChange(root, name, args) {
+  try {
+    if (name === 'writeFile') {
+      const full = safeResolve(root, args && args.filePath)
+      let before = ''
+      if (fs.existsSync(full)) {
+        try {
+          before = fs.readFileSync(full, 'utf-8')
+        } catch (e) {
+          before = ''
+        }
+      }
+      return { before, after: args && typeof args.content === 'string' ? args.content : '' }
+    }
+    if (name === 'editFile') {
+      const full = safeResolve(root, args && args.filePath)
+      const oldStr = args && args.oldStr
+      const newStr = args && args.newStr
+      if (typeof oldStr !== 'string' || typeof newStr !== 'string') {
+        return { previewError: '参数缺失，无法预览' }
+      }
+      let text = ''
+      try {
+        text = fs.readFileSync(full, 'utf-8')
+      } catch (e) {
+        return { previewError: '文件读取失败，无法预览' }
+      }
+      if (!text.includes(oldStr)) {
+        return { previewError: '匹配失败，无法预览' }
+      }
+      return { before: text, after: text.replace(oldStr, newStr) }
+    }
+    return null
+  } catch (e) {
+    console.error('[tools] previewFileChange 异常，降级为无预览:', e)
+    return null
+  }
+}

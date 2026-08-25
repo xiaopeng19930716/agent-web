@@ -2,6 +2,7 @@
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { streamChat, summarizeChat } from '../api/agent.js'
+import { buildDiffRows } from '../utils/diff.js'
 import {
   activeProjectId,
   getActiveProject,
@@ -149,6 +150,7 @@ async function onConfirmAdd(project) {
 }
 
 const composerRef = ref(null)
+const msgListRef = ref(null)
 
 // 粗略估算文本 token：中日韩等按 1 字符/token，其余按 4 字符/token
 function estimateTokens(text = '') {
@@ -345,6 +347,7 @@ async function runAssistantTurn(session, options = {}) {
         id: payload.id,
         name: payload.name,
         args: payload.args || {},
+        preview: payload.preview || null, // 文件改动的 before/after 或 previewError
       }
     },
     onReasoning: (text) => {
@@ -358,6 +361,7 @@ async function runAssistantTurn(session, options = {}) {
     onToolCall: (payload) => {
       if (payload.status === 'start') {
         const entry = reactive({
+          id: payload.id || '',
           name: payload.name,
           args: payload.args || {},
           status: 'running',
@@ -484,6 +488,20 @@ async function rollbackTo(msg) {
   composerRef.value?.focusComposer()
 }
 
+// 确认弹窗的 diff 预览：仅在 preview 含 before/after 时计算
+const confirmFilePath = computed(() => (toolConfirm.value ? toolConfirm.value.args?.filePath : ''))
+const confirmDiffRows = computed(() => {
+  const p = toolConfirm.value && toolConfirm.value.preview
+  if (p && typeof p.before === 'string' && typeof p.after === 'string') {
+    return buildDiffRows(confirmFilePath.value || 'file', p.before, p.after)
+  }
+  return []
+})
+const confirmPreviewError = computed(() => {
+  const p = toolConfirm.value && toolConfirm.value.preview
+  return p && p.previewError ? p.previewError : ''
+})
+
 // 重新生成某条 assistant 回复：保留其前面全部上下文，删除该条及其之后，
 // 再以相同前文重新请求模型（不再新增 user 消息，直接复用已有上下文）。
 async function regenerate(msg) {
@@ -526,6 +544,53 @@ async function regenerate(msg) {
   })
 }
 
+// #10 单条工具重试：调后端用原始参数重跑该工具，结果回来后原地替换对应 tool 节点的 result
+async function onRetryTool({ msg, tool, key }) {
+  if (loading.value) return
+  const session = sessions.list.find((s) => s.id === sessions.activeSessionId)
+  if (!session) return
+  const pid = session.projectId === NO_PROJECT_KEY ? null : session.projectId
+  // 用当前会话的权限级别（与 /chat 一致），无配置时默认 full
+  const permission = session.permission || 'full'
+  const { ok, error } = await retryToolCall(
+    { projectId: pid, permission, name: tool.name, args: tool.args, sessionId: session.id },
+    {
+      onToolRetry: (json) => {
+        // 确认弹窗（ask 模式）：直接走现有 tool_confirm 流程，弹窗允许后后端继续重跑
+        if (json.type === 'tool_confirm') {
+          toolConfirm.value = {
+            id: json.id,
+            name: json.name,
+            args: json.args || {},
+            preview: json.preview || null,
+          }
+          return
+        }
+        // start/end 事件：定位该 tool 节点并就地更新
+        if (json.type === 'tool_call') {
+          const target = msg.toolCalls.find((t) => t.name === json.name && t.status === 'done' && t.args && JSON.stringify(t.args) === JSON.stringify(tool.args))
+          if (target) {
+            if (json.status === 'start') {
+              target.status = 'running'
+              target.result = ''
+            } else if (json.status === 'end') {
+              target.status = 'done'
+              target.result = json.result || ''
+            }
+          }
+        }
+      },
+      onDone: () => {
+        msgListRef.value?.clearRetrying(key)
+      },
+    }
+  )
+  if (!ok) {
+    error.value = '工具重试失败: ' + (error || '未知错误')
+    msgListRef.value?.clearRetrying(key)
+  }
+}
+
 // 切换项目
 async function init() {
   // 左侧对话框仅加载未归档会话（archived=0）
@@ -551,7 +616,7 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
 
     <div class="chat__body" :class="{ 'chat__body--with-changes': showChanges }">
       <div class="chat__conversation">
-        <MessageList :messages="currentMessages" :active="active" :error="error" :project-id="activeProjectId.id || ''" @rollback="rollbackTo" @regenerate="regenerate" />
+        <MessageList ref="msgListRef" :messages="currentMessages" :active="active" :error="error" :project-id="activeProjectId.id || ''" @rollback="rollbackTo" @regenerate="regenerate" @retryTool="onRetryTool" />
         <ComposerInput
           ref="composerRef"
           :active="active"
@@ -604,8 +669,28 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
       <p v-if="toolConfirm" style="margin-bottom: 8px">
         助手请求执行 <strong>{{ toolConfirm.name }}</strong> 工具，请确认是否允许：
       </p>
+
+      <!-- 文件改动预览：before/after 渲染 diff -->
+      <div v-if="confirmDiffRows.length" class="confirm-diff">
+        <div class="confirm-diff__head">{{ confirmFilePath }}</div>
+        <div class="confirm-diff__body">
+          <div
+            v-for="(r, i) in confirmDiffRows"
+            :key="i"
+            class="confirm-diff__row"
+            :class="'confirm-diff__row--' + r.type"
+          ><span class="confirm-diff__sign">{{ r.type === 'add' ? '+' : r.type === 'del' ? '-' : r.type === 'hunk' ? '' : ' ' }}</span><span class="confirm-diff__text">{{ r.text }}</span></div>
+        </div>
+      </div>
+
+      <!-- 预览失败：标红提示（如 editFile oldStr 未命中） -->
+      <div v-else-if="confirmPreviewError" class="confirm-diff__error">
+        ⚠ {{ confirmPreviewError }}（无法预览具体改动，请谨慎确认）
+      </div>
+
+      <!-- 无 preview（命令/非文件工具）：仍显示纯参数文本 -->
       <pre
-        v-if="toolConfirm"
+        v-else
         style="max-height: 280px; overflow: auto; background: #f6f8fa; padding: 10px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; font-size: 12px"
         >{{ formatToolArgs(toolConfirm.args) }}</pre>
     </a-modal>
@@ -654,5 +739,66 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
 .changes-fade-enter-to,
 .changes-fade-leave-from {
   opacity: 1;
+}
+/* 确认弹窗内的文件改动 diff 预览 */
+.confirm-diff {
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.confirm-diff__head {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  background: #f3f4f6;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  word-break: break-all;
+}
+.confirm-diff__body {
+  max-height: 300px;
+  overflow: auto;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.confirm-diff__row {
+  display: flex;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.confirm-diff__row--add {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+}
+.confirm-diff__row--del {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+.confirm-diff__row--hunk {
+  background: #f3f4f6;
+  color: #6b7280;
+  padding: 2px 0;
+}
+.confirm-diff__sign {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  user-select: none;
+  opacity: 0.7;
+}
+.confirm-diff__text {
+  flex: 1;
+  padding-right: 8px;
+}
+.confirm-diff__error {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
 }
 </style>

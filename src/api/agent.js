@@ -259,6 +259,50 @@ export async function abortChat({ sessionId }) {
   }
 }
 
+// #10 工具调用单条重试：用原始 name/args 重新执行某条工具，SSE 流式返回 start/end 事件。
+// 回调：onToolRetry(call) 收到 start/end 事件；onDone() 流结束。
+export async function retryToolCall(
+  { projectId, permission, name, args, sessionId },
+  { onToolRetry, onDone } = {}
+) {
+  try {
+    const resp = await fetch('/api/chat/retry-tool', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId, permission, name, args, sessionId }),
+    })
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}))
+      return { ok: false, error: data.error || `请求失败: ${resp.status}` }
+    }
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const parts = buf.split('\n\n')
+      buf = parts.pop() || ''
+      for (const part of parts) {
+        const line = part.replace(/^data:\s*/, '').trim()
+        if (!line || line === '[DONE]') continue
+        try {
+          const json = JSON.parse(line)
+          if (json.type === 'tool_call') onToolRetry?.(json)
+          else if (json.type === 'tool_confirm') onToolRetry?.(json) // 确认弹窗透传
+          else if (json.type === 'tool_retry_done') onDone?.(json)
+        } catch {
+          // 忽略非 JSON 行
+        }
+      }
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
+}
+
 // 上下文压缩：请求后端把早期对话压缩为摘要（非流式），供历史过长时替换早期消息
 export async function summarizeChat({ messages, config }) {
   try {

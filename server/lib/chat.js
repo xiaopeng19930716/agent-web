@@ -8,7 +8,7 @@ import {
 } from '@langchain/core/messages'
 import { BaseCallbackHandler } from '@langchain/core/callbacks/base'
 import { DASHSCOPE_BASE, API_KEY, DEFAULT_MODEL, MODELS_FILE, readConfigFile } from './config.js'
-import { buildTools } from './fileTools.js'
+import { buildTools, previewFileChange } from './fileTools.js'
 
 // 从服务端持久化的 models.json 解析指定模型的密钥与 baseURL，
 // 避免前端在 /chat 请求中明文传递 apiKey。密钥完全来自用户配置，不读取环境变量。
@@ -138,6 +138,14 @@ export function buildChatModel(cfg, callbacks) {
 
 // Agent 主循环：多轮「模型推理 → 工具调用 → 回灌结果」直至模型不再请求工具
 // 全程流式输出到 res（reasoning 增量 + 正文增量 + 工具调用结构化事件）
+// 单条工具重跑（#10 工具重试）：供 /api/chat/retry-tool 复用同一执行+确认+拦截逻辑
+export async function runSingleTool({ toolRoot, permission, name, args, res, confirmGate, abortSignal }) {
+  const tools = buildTools(toolRoot, permission, null, null)
+  const toolMap = Object.fromEntries(tools.map((t) => [t.name, t]))
+  const call = { id: 'retry-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8), name, args }
+  return executeToolCall(call, toolMap, res, { toolRoot, permission, confirmGate, abortSignal })
+}
+
 export async function runAgent(model, history, projectRoot, res, permission = 'full', callbacks, opts = {}) {
   const {
     fileRoot,
@@ -175,7 +183,7 @@ export async function runAgent(model, history, projectRoot, res, permission = 'f
     for (const call of toolCalls) {
       // 工具执行前再次检查停止信号
       if (abortSignal?.aborted) break
-      const result = await executeToolCall(call, toolMap, res, { permission, confirmGate, abortSignal })
+      const result = await executeToolCall(call, toolMap, res, { toolRoot, permission, confirmGate, abortSignal })
       messages.push(new ToolMessage({ content: result, tool_call_id: call.id }))
     }
     if (abortSignal?.aborted) break
@@ -243,10 +251,10 @@ async function streamModelTurn(modelWithTools, messages, res, callbacks, abortSi
 }
 
 // 执行单个工具调用：发出 start/end 结构化事件并返回结果字符串
+// toolRoot：文件工具安全边界（项目根/主目录），由调用方传入（不再依赖闭包）
 // options.confirmGate：ask 模式下的确认闸门（非 ask 模式不传，直接执行）
 // options.abortSignal：停止生成信号；执行前/执行中中止则中断
-async function executeToolCall(call, toolMap, res, options = {}) {
-  const { permission = 'full', confirmGate = null, abortSignal = null } = options
+async function executeToolCall(call, toolMap, res, { toolRoot, permission = 'full', confirmGate = null, abortSignal = null } = {}) {
   const tool = toolMap[call.name]
 
   // 执行前检查停止
@@ -256,7 +264,7 @@ async function executeToolCall(call, toolMap, res, options = {}) {
     return msg
   }
 
-  res.write(`data: ${JSON.stringify({ type: 'tool_call', name: call.name, args: call.args, status: 'start' })}\n\n`)
+  res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, args: call.args, status: 'start' })}\n\n`)
 
   // 危险命令强制拦截（即便用户/模型允许也拒绝），与 executeCommand 内部规则保持一致
   if (call.name === 'executeCommand' && isDangerousCommand(call.args && call.args.command)) {
@@ -268,7 +276,9 @@ async function executeToolCall(call, toolMap, res, options = {}) {
   // ask 模式 + 高风险工具 -> 暂停等待用户确认
   const needConfirm = permission === 'ask' && confirmGate && tool && (tool.risk === 'write' || tool.risk === 'danger')
   if (needConfirm) {
-    const decision = await confirmGate.ask(call.id, call.name, call.args)
+    // 确认前预计算文件改动（不落盘），供前端渲染 diff；非文件工具返回 null
+    const preview = previewFileChange(toolRoot, call.name, call.args)
+    const decision = await confirmGate.ask(call.id, call.name, call.args, preview)
     if (decision === 'deny') {
       const denied = '用户拒绝了该工具调用（' + call.name + '）。请向用户说明，并改用其他安全方案或停止该操作。'
       res.write(`data: ${JSON.stringify({ type: 'tool_call', id: call.id, name: call.name, status: 'denied', result: denied })}\n\n`)

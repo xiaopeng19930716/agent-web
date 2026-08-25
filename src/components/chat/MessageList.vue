@@ -21,7 +21,7 @@ const props = defineProps({
   projectId: { type: String, default: '' },
 })
 
-const emit = defineEmits(['rollback', 'regenerate', 'restore'])
+const emit = defineEmits(['rollback', 'regenerate', 'restore', 'retryTool'])
 
 // 对话级回退：删除该消息及其之后 / 重新生成
 function onEdit(m) {
@@ -30,6 +30,14 @@ function onEdit(m) {
 
 function onRegenerate(m) {
   emit('regenerate', m)
+}
+
+// 单条工具重试：标记 loading 并向上抛出，由 ChatPanel 调后端重跑，结果回来后原地替换
+function onRetryTool(m, t, i, ti) {
+  const k = resultKey(i, ti)
+  if (retrying.has(k)) return
+  retrying.add(k)
+  emit('retryTool', { msg: m, tool: t, key: k })
 }
 
 const scrollEl = ref(null)
@@ -83,6 +91,8 @@ function clip(text, n = 1200) {
 
 // 工具结果展开/收起状态（以「消息索引-工具索引」为 key，避免跨消息联动）
 const resultExpanded = reactive(new Set())
+// 工具重试中状态（同 key 维度）
+const retrying = reactive(new Set())
 function resultKey(i, ti) {
   return `${i}-${ti}`
 }
@@ -140,6 +150,12 @@ watch(
 
 // 挂载后初始化按钮可见性（例如刷新后内容很长且未停在底部）
 onMounted(updateToBottom)
+
+// 供父组件（ChatPanel）清除某条工具的重试 loading 态
+function clearRetrying(k) {
+  retrying.delete(k)
+}
+defineExpose({ clearRetrying })
 </script>
 
 <template>
@@ -254,6 +270,18 @@ onMounted(updateToBottom)
                           </span>
                           <pre v-show="resultExpanded.has(resultKey(i, ti))" class="timeline__result-body">{{ clip(t.result, 1200) }}</pre>
                         </div>
+                        <button
+                          v-if="t.status === 'done'"
+                          type="button"
+                          class="timeline__retry"
+                          :disabled="retrying.has(resultKey(i, ti))"
+                          :aria-label="'重试工具 ' + t.name"
+                          @click="onRetryTool(m, t, i, ti)"
+                        >
+                          <Loader2 v-if="retrying.has(resultKey(i, ti))" :size="12" class="timeline__spin" />
+                          <Redo2 v-else :size="12" />
+                          <span>{{ retrying.has(resultKey(i, ti)) ? '重试中' : '重试' }}</span>
+                        </button>
                       </div>
                     </li>
                   </ul>
