@@ -373,7 +373,7 @@ onMounted(updateToBottom)
   min-height: 0;
   overflow-y: auto;
   padding: 22px;
-  background: #ffffff;
+  background: var(--color-bg);
 }
 .chat__to-bottom {
   position: absolute;
@@ -385,7 +385,7 @@ onMounted(updateToBottom)
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fff;
+  background: var(--color-bg);
   border: 1px solid @color-border;
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.15);
   color: @color-primary;
@@ -413,7 +413,7 @@ onMounted(updateToBottom)
   transform: translateY(8px);
 }
 .chat__empty {
-  color: #64748b;
+  color: @color-text-muted;
   text-align: center;
   margin-top: 48px;
   line-height: 1.9;
@@ -423,10 +423,10 @@ onMounted(updateToBottom)
   display: inline-block;
   margin: 8px 0 14px;
   padding: 6px 12px;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
+  background: var(--color-bg-subtle);
+  border: 1px solid @color-border;
   border-radius: 6px;
-  color: #1f2937;
+  color: @color-text-strong;
   font-family: 'Fira Code', Consolas, monospace;
   font-size: 13px;
   max-width: 100%;
@@ -527,13 +527,13 @@ onMounted(updateToBottom)
   height: 28px;
   border-radius: 8px;
   border: 1px solid @color-border;
-  background: #ffffff;
+  background: var(--color-bg);
   color: @color-text-muted;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
 }
 .msg__action:hover:not(:disabled) {
-  background: #f1f5f9;
+  background: var(--color-bg-subtle);
   color: @color-primary;
   border-color: @color-primary;
   transform: translateY(-1px);
@@ -576,7 +576,7 @@ onMounted(updateToBottom)
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 .bubble__iconbtn:hover:not(:disabled) {
-  background: #f1f5f9;
+  background: var(--color-bg-subtle);
   border-color: @color-border;
   color: @color-text;
 }
@@ -621,7 +621,7 @@ onMounted(updateToBottom)
   border-color: rgba(255, 255, 255, 0.45);
 }
 .bubble--ai .bubble__content {
-  background: #ffffff;
+  background: var(--color-bg);
   border: 1px solid @color-border;
   color: @color-text;
   border-bottom-left-radius: 5px;
@@ -661,7 +661,7 @@ onMounted(updateToBottom)
 .thinking {
   margin-bottom: 10px;
   max-width: 100%;
-  background: #f8fafc;
+  background: var(--color-bg-subtle);
   border: 1px solid @color-border;
   border-left: 3px solid @color-primary;
   border-radius: 10px;
@@ -672,14 +672,14 @@ onMounted(updateToBottom)
 .thinking--nested {
   margin: 0 0 10px;
   padding: 8px 10px;
-  background: #f1f5f9;
+  background: var(--color-bg);
   border: none;
   border-left: 3px solid @color-text-muted;
   border-radius: 8px;
   animation: none;
 }
 .thinking--collapsed {
-  background: #f1f5f9;
+  background: var(--color-bg);
   border-left-color: @color-text-muted;
 }
 .thinking__head {
@@ -787,7 +787,7 @@ onMounted(updateToBottom)
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--color-bg);
   border: 1px solid @color-primary;
   color: #16a34a;
   display: flex;

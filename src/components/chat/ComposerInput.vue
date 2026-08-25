@@ -434,9 +434,9 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
 .chat__context-group {
   display: inline-flex;
   align-items: center;
-  border: 1px solid #e2e8f0;
+  border: 1px solid @color-border;
   border-radius: 999px;
-  background: #ffffff;
+  background: var(--color-bg);
   overflow: hidden;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
@@ -446,9 +446,9 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
   gap: 6px;
   max-width: 180px;
   padding: 5px 12px;
-  border-right: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #475569;
+  border-right: 1px solid @color-border;
+  background: var(--color-bg-subtle);
+  color: @color-text;
   font-size: 12px;
   font-weight: 500;
   cursor: default;
@@ -456,13 +456,13 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
 }
 .chat__project-icon {
   flex-shrink: 0;
-  color: #64748b;
+  color: @color-text-muted;
 }
 .chat__project-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #94a3b8;
+  background: @color-text-muted;
   flex-shrink: 0;
 }
 .chat__project-label {
@@ -478,17 +478,17 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
   justify-content: center;
   border: none;
   background: transparent;
-  color: #64748b;
+  color: @color-text-muted;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
 .chat__newproj:hover {
-  background: #2563eb;
+  background: @color-primary;
   color: #fff;
 }
 .chat__newproj:focus-visible,
 .chat__context-group:focus-within {
-  outline: 2px solid #2563eb;
+  outline: 2px solid @color-primary;
   outline-offset: -2px;
 }
 .chat__input {
@@ -498,14 +498,14 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
   gap: 4px;
   margin: 0 16px 16px;
   padding: 10px 14px 12px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--color-bg);
+  border: 1px solid @color-border;
   border-radius: 18px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 .chat__input:focus-within {
-  border-color: #bfdbfe;
+  border-color: @color-primary-hover;
   box-shadow: 0 4px 24px rgba(37, 99, 235, 0.1);
 }
 .chat__input-composer {
@@ -516,7 +516,7 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
   padding: 6px 2px;
   border: none;
   background: transparent;
-  color: #1f2937;
+  color: @color-text-strong;
   font-size: 15px;
   line-height: 1.65;
   outline: none;
@@ -527,7 +527,7 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
 }
 .chat__input-composer:empty::before {
   content: attr(data-placeholder);
-  color: #94a3b8;
+  color: @color-text-muted;
   pointer-events: none;
   font-size: 14px;
 }
@@ -557,17 +557,17 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #e2e8f0;
+  border: 1px solid @color-border;
   border-radius: 8px;
-  background: #ffffff;
-  color: #64748b;
+  background: var(--color-bg);
+  color: @color-text-muted;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 .chat__quick-btn:hover {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
-  color: #334155;
+  background: var(--color-bg-subtle);
+  border-color: @color-border;
+  color: @color-text;
 }
 .chat__controls {
   display: inline-flex;
@@ -581,20 +581,20 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
   gap: 4px;
   padding: 2px 10px 2px 8px;
   border-radius: 999px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #475569;
+  border: 1px solid @color-border;
+  background: var(--color-bg-subtle);
+  color: @color-text;
   font-size: 12px;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
 .chat__control:hover {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
+  background: var(--color-bg);
+  border-color: @color-border;
 }
 .chat__control-icon {
   flex-shrink: 0;
-  color: #94a3b8;
+  color: @color-text-muted;
 }
 .chat__control--model {
   max-width: 320px;
@@ -610,11 +610,11 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
   background: transparent !important;
 }
 .chat__control .ant-select-selection-item {
-  color: #475569;
+  color: @color-text;
   font-weight: 500;
 }
 .chat__control .ant-select-arrow {
-  color: #94a3b8;
+  color: @color-text-muted;
 }
 
 .chat__send {
@@ -637,7 +637,7 @@ defineExpose({ clear, focusComposer, setText, triggerSend });
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45);
 }
 .chat__send:disabled {
-  background: #cbd5e1;
+  background: @color-text-muted;
   box-shadow: none;
   cursor: not-allowed;
 }

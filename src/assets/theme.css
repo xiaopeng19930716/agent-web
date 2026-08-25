@@ -1,0 +1,104 @@
+/* 主题 CSS 变量：亮色（默认）与暗色（html.dark）两套取值。
+   颜色变量在 variables.less 中以 var(--xxx) 引用，运行时切换 html.dark 即可换肤。 */
+
+:root {
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-active-bg: #eff6ff;
+  --color-border: #e2e8f0;
+  --color-text: #334155;
+  --color-text-strong: #1e293b;
+  --color-text-muted: #94a3b8;
+  --color-bg: #f8fafc;
+  --color-bg-subtle: #f1f5f9;
+
+  /* 暗色模式下需单独处理的实体色（组件里有少量写死色值，统一在此映射） */
+  --solid-hover: #f1f5f9;
+  --solid-bg-elevated: #ffffff;
+  --code-bg: #f8fafc;
+  --code-text: #334155;
+  --user-bubble: #2563eb;
+  --user-bubble-text: #ffffff;
+  --scrollbar-thumb: #cbd5e1;
+}
+
+html.dark {
+  --color-primary: #3b82f6;
+  --color-primary-hover: #60a5fa;
+  --color-primary-active-bg: #1e293b;
+  --color-border: #334155;
+  --color-text: #cbd5e1;
+  --color-text-strong: #f1f5f9;
+  --color-text-muted: #64748b;
+  --color-bg: #0f172a;
+  --color-bg-subtle: #1e293b;
+
+  --solid-hover: #334155;
+  --solid-bg-elevated: #1e293b;
+  --code-bg: #0b1220;
+  --code-text: #e2e8f0;
+  --user-bubble: #2563eb;
+  --user-bubble-text: #f8fafc;
+  --scrollbar-thumb: #475569;
+}
+
+/* 全局背景与过渡，避免切换主题时闪烁 */
+html,
+body,
+#app {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* 滚动条暗色适配 */
+* {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* 主题切换平滑过渡 */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease !important;
+}
+
+/* ===== 暗色模式下对组件内写死色值的覆盖（组件样式为 scoped，此处特异性更高可生效） ===== */
+html.dark .bubble__text,
+html.dark .bubble__content {
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+}
+/* 用户气泡内浅色图标按钮在暗色下改用半透明描边 */
+html.dark .bubble--user .bubble__iconbtn {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.85);
+  background: transparent;
+}
+html.dark .bubble--user .bubble__iconbtn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+/* 引用块、工具结果区等浅底在暗色下转深 */
+html.dark .bubble__content :deep(pre) {
+  background: #0b1220;
+  color: #e2e8f0;
+}
+html.dark .bubble__content :deep(code) {
+  color: #e2e8f0;
+}
+html.dark .bubble__content :deep(p code) {
+  background: var(--color-bg);
+  color: #fca5a5;
+}
+/* 工具调用/思考区等浅灰底转深 */
+html.dark .tool-call,
+html.dark .thinking {
+  background: var(--color-bg-subtle);
+  border-color: var(--color-border);
+}
+/* 输入框及搜索等浅色控件转深（如存在硬编码白底） */
+html.dark input,
+html.dark textarea {
+  color: var(--color-text);
+}

@@ -107,6 +107,10 @@
       </nav>
 
       <div class="sidebar__footer">
+        <button class="footer-setting" type="button" @click="toggleTheme">
+          <component :is="isDark ? Sun : Moon" :size="16" />
+          <span>{{ isDark ? '亮色模式' : '暗色模式' }}</span>
+        </button>
         <RouterLink to="/settings" class="footer-setting">
           <Settings :size="16" />
           <span>设置</span>
@@ -123,7 +127,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRouter, useRoute } from 'vue-router'
-import { Plus, Search, Settings, MessageSquare, Archive, Trash2 } from 'lucide-vue-next'
+import { Plus, Search, Settings, MessageSquare, Archive, Trash2, Sun, Moon } from 'lucide-vue-next'
 import { projects, activeProjectId, removeProject, fetchProjects } from './projects.js'
 import { createSession, fetchSessions, deleteSession, archiveSession, updateSession, sessions, NO_PROJECT_KEY } from './sessions.js'
 import { emitBus } from './bus.js'
@@ -133,6 +137,22 @@ const route = useRoute()
 const keyword = ref('')
 
 const activeSessionId = computed(() => sessions.activeSessionId)
+
+// 暗色模式：状态持久化到 localStorage（key: agent-theme），启动时由 main.js 应用
+const isDark = ref(document.documentElement.classList.contains('dark'))
+function applyTheme(dark) {
+  const el = document.documentElement
+  el.classList.add('theme-transition')
+  if (dark) el.classList.add('dark')
+  else el.classList.remove('dark')
+  localStorage.setItem('agent-theme', dark ? 'dark' : 'light')
+  window.clearTimeout(applyTheme._t)
+  applyTheme._t = window.setTimeout(() => el.classList.remove('theme-transition'), 250)
+}
+function toggleTheme() {
+  isDark.value = !isDark.value
+  applyTheme(isDark.value)
+}
 
 // 第一个真实项目组在分组列表中的索引；无项目时返回 -1
 // 用于把"添加项目"按钮插在「通用对话最下方、首个项目上方」
@@ -353,7 +373,7 @@ watch(
 .sidebar {
   width: 280px;
   flex-shrink: 0;
-  background: #ffffff;
+  background: var(--color-bg);
   border-right: 1px solid @color-border;
   display: flex;
   flex-direction: column;
@@ -400,11 +420,11 @@ watch(
     background: @color-bg-subtle;
     padding: 0 12px 0 34px;
     font-size: 14px;
-    color: #1f2937;
+    color: @color-text-strong;
     outline: none;
 
     &:focus {
-      box-shadow: 0 0 0 2px #bfdbfe;
+      box-shadow: 0 0 0 2px @color-primary;
     }
   }
 }
@@ -469,12 +489,12 @@ watch(
     opacity: 1;
   }
   &__add:hover {
-    background: #dbeafe;
+    background: @color-primary-active-bg;
     color: @color-primary;
   }
   &__del:hover {
-    background: #fee2e2;
-    color: #dc2626;
+    background: rgba(220, 38, 38, 0.12);
+    color: #ef4444;
   }
 }
 .conv-group__addproject {
@@ -484,7 +504,7 @@ watch(
   margin: 12px 14px 8px;
   padding: 6px 10px;
   width: calc(100% - 28px);
-  border: 1px dashed #d1d5db;
+  border: 1px dashed @color-border;
   border-radius: 8px;
   background: transparent;
   color: @color-text-muted;
@@ -493,7 +513,7 @@ watch(
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 .conv-group__addproject:hover {
-  background: #eff6ff;
+  background: @color-primary-active-bg;
   border-color: @color-primary;
   color: @color-primary;
 }
@@ -520,7 +540,7 @@ watch(
   }
   &--active {
     background: @color-primary-active-bg;
-    color: #1e40af;
+    color: @color-primary;
 
     &::before {
       content: '';
@@ -561,11 +581,11 @@ watch(
     .btn-rounded(4px);
     padding: 3px 6px;
     font-size: 14px;
-    color: #1f2937;
-    background: #fff;
+    color: @color-text-strong;
+    background: var(--color-bg);
     outline: none;
     font-family: inherit;
-    box-shadow: 0 0 0 2px #bfdbfe;
+    box-shadow: 0 0 0 2px @color-primary;
   }
   &__del {
     flex-shrink: 0;
@@ -611,10 +631,14 @@ watch(
   gap: 8px;
   padding: 8px 10px;
   .btn-rounded(@radius-md);
-  color: #475569;
+  color: @color-text;
   font-size: 14px;
   font-weight: 500;
   text-decoration: none;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  width: 100%;
 
   &:hover {
     background: @color-bg-subtle;
