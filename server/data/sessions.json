@@ -1842,10 +1842,42 @@
           "durationMs": 3274,
           "status": "ok"
         }
+      },
+      {
+        "id": "m_mt81a23o7yab6e",
+        "role": "user",
+        "content": "解释一下什么是ReAct",
+        "tags": [
+          {
+            "type": "text",
+            "text": "解释一下什么是ReAct"
+          }
+        ],
+        "metadata": {
+          "timestamp": 1787624176164
+        }
+      },
+      {
+        "id": "m_mt81a23ozt3gjn",
+        "role": "assistant",
+        "content": "# ReAct 是什么？\n\n**ReAct** = **Re**asoning + **Act**ing（推理 + 行动）\n\n它是一种让大语言模型（LLM）**交替进行\"思考\"和\"行动\"**的框架，由 Yao et al. 在 2022 年的论文 *\"ReAct: Synergizing Reasoning and Acting in Language Models\"* 中提出。\n\n---\n\n## 核心思想\n\n传统的 LLM 应用有两种模式：\n\n| 模式 | 特点 | 缺点 |\n|------|------|------|\n| **纯推理（Reason-only）** | 模型自己思考、生成答案 | 容易产生幻觉，无法获取实时信息 |\n| **纯行动（Act-only）** | 直接调用工具、执行操作 | 缺乏规划，容易盲目行动 |\n\n**ReAct 将两者结合**：模型先推理（我应该做什么？为什么？），再行动（调用工具），然后观察结果，再继续推理……形成一个循环。\n\n---\n\n## 工作流程\n\n```\nThought（思考）→ Action（行动）→ Observation（观察）→ Thought → Action → ...\n```\n\n举个具体例子，用户问：\"北京今天天气怎么样？\"\n\n```\nThought: 用户想知道北京今天的天气，我需要调用天气查询工具。\nAction: get_weather(city=\"北京\")\nObservation: 北京今天晴，25°C，微风。\nThought: 我已经获得了天气信息，可以给用户回答了。\nAnswer: 北京今天天气晴朗，气温25°C，微风，适合出行。\n```\n\n---\n\n## 为什么 ReAct 很重要？\n\n1. **减少幻觉**：通过实际调用工具获取真实数据，而不是靠模型\"编造\"\n2. **可解释性强**：每一步 Thought 都清晰展示了模型的推理过程\n3. **灵活扩展**：可以接入各种工具（搜索引擎、数据库、API、代码执行器等）\n4. **复杂任务分解**：能把复杂问题拆成多步来解决\n\n---\n\n## 实际应用场景\n\n- 🤖 **AI Agent（智能体）**：如 AutoGPT、LangChain Agent 的核心范式\n- 🔍 **RAG（检索增强生成）**：先检索文档，再基于检索结果推理回答\n- 🛠️ **工具调用（Function Calling）**：模型决定调用哪个函数、传什么参数\n- 🧪 **代码调试**：思考 → 执行代码 → 观察报错 → 再思考修复方案\n\n---\n\n## 一句话总结\n\n> **ReAct 就是让 AI \"先想再做，做完再看，看了再想\"**，通过推理和行动的交替循环来解决复杂问题。\n\n这也是当前大多数 AI Agent 框架（包括你现在正在使用的这个系统）的底层工作模式 😄\n\n有什么想深入了解的吗？",
+        "reasoning": "用户问的是\"什么是ReAct\"，这是一个关于AI/LLM领域的概念性问题。\n\nReAct 是一个在大型语言模型（LLM）领域非常重要的概念，我需要解释清楚：\n1. ReAct 的全称和含义\n2. 它的核心思想\n3. 它的工作原理\n4. 它的应用场景\n\n这是一个纯知识性的问题，不需要调用工具，我可以直接基于我的知识来回答。\n\nReAct = Reasoning + Acting，是一种让LLM交替进行推理和行动的框架。",
+        "reasoningDone": true,
+        "done": true,
+        "showThinking": true,
+        "toolCalls": [],
+        "metadata": {
+          "timestamp": 1787624188963,
+          "model": "Alibaba/qwen3.7-plus-2026-05-26",
+          "tokens": 4576,
+          "durationMs": 12604,
+          "firstTokenMs": 2728,
+          "status": "ok"
+        }
       }
     ],
     "createdAt": 1787565009097,
-    "updatedAt": 1787565636315
+    "updatedAt": 1787624188969
   },
   {
     "id": "s_mt72hhx7oe9k",
