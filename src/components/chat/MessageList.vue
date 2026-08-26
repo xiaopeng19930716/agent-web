@@ -1001,7 +1001,6 @@ defineExpose({ clearRetrying })
     animation: none !important;
   }
 }
-<<<<<<< HEAD
 /* 计划模式：拆解后的子任务清单卡片 */
 .plan-card {
   border: 1px solid var(--color-border);
