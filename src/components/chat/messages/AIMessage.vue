@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { ChevronDown, ChevronUp, Check, Loader2, Copy, Redo2, Timer, ListTree } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Check, Loader2, Copy, Redo2, Timer, ListTree, Brain, Wrench, Terminal, FileSearch, Search, Database, Globe, Code, AlertCircle, CheckCircle2, ChevronDown as IconChevronDown } from 'lucide-vue-next'
 import { message } from 'ant-design-vue'
 
 const props = defineProps({
@@ -75,6 +75,17 @@ function clip(text, n = 1200) {
   const s = String(text || '')
   return s.length > n ? s.slice(0, n) + `…（已截断，共 ${s.length} 字）` : s
 }
+function toolIcon(name) {
+  const n = String(name || '').toLowerCase()
+  if (n.includes('search') || n.includes('find')) return Search
+  if (n.includes('file') || n.includes('read') || n.includes('list')) return FileSearch
+  if (n.includes('web') || n.includes('http') || n.includes('url') || n.includes('fetch')) return Globe
+  if (n.includes('db') || n.includes('sql') || n.includes('query')) return Database
+  if (n.includes('code') || n.includes('exec') || n.includes('run')) return Code
+  if (n.includes('terminal') || n.includes('shell') || n.includes('bash')) return Terminal
+  return Wrench
+}
+
 function isToolFailed(t) {
   const r = String(t.result || '')
   return (
@@ -133,70 +144,107 @@ async function copyContent(text) {
               </li>
             </ol>
           </div>
-          <!-- Agent 思考区 -->
+          <!-- Agent 思考区：精致的思考轨迹卡 -->
           <div
             v-if="m.role === 'assistant' && (m.showThinking || !m.done || m.reasoning || (m.toolCalls || []).length)"
-            class="thinking thinking--nested"
+            class="thinking thinking--clean"
             :class="{ 'thinking--collapsed': !thinkingExpanded }"
           >
             <button class="thinking__head" :aria-expanded="thinkingExpanded" @click="toggleThinking">
               <span class="thinking__dot" :class="{ 'thinking__dot--done': m.reasoningDone }"></span>
-              <template v-if="!m.reasoningDone">
-                <span class="thinking__title">思考中</span>
-                <span class="thinking__dots"><i></i><i></i><i></i></span>
-                <ChevronDown v-if="!thinkingExpanded" :size="14" class="thinking__chevron" />
-                <ChevronUp v-else :size="14" class="thinking__chevron" />
-              </template>
+              <span v-if="m.reasoningDone" class="thinking__title thinking__title--done">
+                <span class="thinking__title-icon"><Brain :size="13" /></span>已思考
+              </span>
               <template v-else>
-                <span class="thinking__title thinking__title--done">✓ 思考完成</span>
-                <span v-if="(m.toolCalls || []).length" class="thinking__summary">
-                  已调用 {{ (m.toolCalls || []).length }} 个工具 · 用时思考
+                <span class="thinking__title">
+                  <span class="thinking__title-icon thinking__title-icon--spin"><Brain :size="13" /></span>思考中
                 </span>
-                <ChevronDown v-if="!thinkingExpanded" :size="14" class="thinking__chevron" />
-                <ChevronUp v-else :size="14" class="thinking__chevron" />
+                <span class="thinking__dots"><i></i><i></i><i></i></span>
               </template>
+              <span
+                v-if="m.reasoningDone && (m.toolCalls || []).length"
+                class="thinking__summary"
+              >调用 {{ (m.toolCalls || []).length }} 次工具</span>
+              <ChevronDown v-if="!thinkingExpanded" :size="14" class="thinking__chevron thinking__chevron--down" />
+              <ChevronUp v-else :size="14" class="thinking__chevron thinking__chevron--down" />
             </button>
             <div v-show="thinkingExpanded" class="thinking__body">
               <div v-if="m.reasoning" class="thinking__reason">{{ m.reasoning }}</div>
               <!-- 工具调用时间线 -->
               <ul v-if="(m.toolCalls || []).length" class="timeline">
-                <li v-for="(t, ti) in (m.toolCalls || [])" :key="ti" class="timeline__item">
-                  <span class="timeline__rail">
-                    <span class="timeline__node" :class="{ 'timeline__node--done': t.status === 'done' }">
-                      <Check v-if="t.status === 'done'" :size="11" />
-                      <Loader2 v-else :size="11" class="timeline__spin" />
-                    </span>
-                  </span>
-                  <div class="timeline__main">
-                    <div class="timeline__head">
-                      <span class="timeline__icon">⚙</span>
-                      <span class="timeline__name">调用 {{ t.name }}</span>
-                      <button
-                        v-if="t.status === 'done' && isToolFailed(t)"
-                        type="button"
-                        class="timeline__retry"
-                        :class="{ 'timeline__retry--spin': retrying.has(String(ti)) }"
-                        :disabled="retrying.has(String(ti))"
-                        :title="retrying.has(String(ti)) ? '重试中' : '重试工具 ' + t.name"
-                        :aria-label="'重试工具 ' + t.name"
-                        @click="onRetryTool(t, ti)"
-                      >
-                        <Loader2 v-if="retrying.has(String(ti))" :size="12" class="timeline__spin" />
-                        <span v-else>重试</span>
-                      </button>
-                      <span
-                        class="timeline__status"
-                        :class="{ 'timeline__status--done': t.status === 'done' && !isToolFailed(t), 'timeline__status--failed': t.status === 'done' && isToolFailed(t) }"
-                      >{{ t.status !== 'done' ? '执行中' : (isToolFailed(t) ? '失败' : '完成') }}</span>
-                    </div>
-                    <div v-if="Object.keys(t.args || {}).length" class="timeline__args">
-                      {{ prettyArgs(t.args) }}
-                    </div>
-                    <div v-if="t.status === 'done' && t.result" class="timeline__result">
-                      <span class="timeline__result-label" @click="toggleResult(ti)">
-                        {{ resultExpanded.has(String(ti)) ? '收起结果' : '查看结果' }}
-                      </span>
-                      <pre v-show="resultExpanded.has(String(ti))" class="timeline__result-body">{{ clip(t.result, 1200) }}</pre>
+                <li
+                  v-for="(t, ti) in (m.toolCalls || [])"
+                  :key="ti"
+                  class="timeline__item"
+                  :class="{
+                    'timeline__item--done': t.status === 'done' && !isToolFailed(t),
+                    'timeline__item--failed': t.status === 'done' && isToolFailed(t),
+                    'timeline__item--running': t.status !== 'done'
+                  }"
+                >
+                  <span class="timeline__connector" aria-hidden="true"></span>
+                  <div class="timeline__card">
+                    <div class="timeline__accent" aria-hidden="true"></div>
+                    <div class="timeline__content">
+                      <div class="timeline__head">
+                        <span class="timeline__icon">
+                          <component :is="toolIcon(t.name)" :size="14" />
+                        </span>
+                        <span class="timeline__name" :title="t.name">{{ t.name }}</span>
+                        <button
+                          v-if="t.status === 'done' && isToolFailed(t)"
+                          type="button"
+                          class="timeline__retry"
+                          :class="{ 'timeline__retry--spin': retrying.has(String(ti)) }"
+                          :disabled="retrying.has(String(ti))"
+                          :title="retrying.has(String(ti)) ? '重试中' : '重试工具 ' + t.name"
+                          :aria-label="'重试工具 ' + t.name"
+                          @click="onRetryTool(t, ti)"
+                        >
+                          <Loader2 v-if="retrying.has(String(ti))" :size="12" class="timeline__spin" />
+                          <Redo2 v-else :size="12" />
+                          <span>重试</span>
+                        </button>
+                        <span
+                          class="timeline__status"
+                          :class="{
+                            'timeline__status--done': t.status === 'done' && !isToolFailed(t),
+                            'timeline__status--failed': t.status === 'done' && isToolFailed(t),
+                            'timeline__status--running': t.status !== 'done'
+                          }"
+                        >
+                          <CheckCircle2 v-if="t.status === 'done' && !isToolFailed(t)" :size="11" />
+                          <AlertCircle v-else-if="t.status === 'done' && isToolFailed(t)" :size="11" />
+                          <Loader2 v-else :size="11" class="timeline__spin" />
+                          <span>{{ t.status !== 'done' ? '执行中' : (isToolFailed(t) ? '失败' : '完成') }}</span>
+                        </span>
+                      </div>
+                      <div v-if="Object.keys(t.args || {}).length" class="timeline__args">
+                        <span v-for="(v, k) in t.args" :key="k" class="timeline__arg">
+                          <span class="timeline__arg-key">{{ k }}</span>
+                          <span class="timeline__arg-val" :title="typeof v === 'string' ? v : JSON.stringify(v)">
+                            {{ typeof v === 'string' ? v : JSON.stringify(v) }}
+                          </span>
+                        </span>
+                      </div>
+                      <div v-if="t.status === 'done' && t.result" class="timeline__result">
+                        <button
+                          type="button"
+                          class="timeline__result-toggle"
+                          :aria-expanded="resultExpanded.has(String(ti))"
+                          @click="toggleResult(ti)"
+                        >
+                          <IconChevronDown
+                            :size="12"
+                            class="timeline__result-chevron"
+                            :class="{ 'timeline__result-chevron--expanded': resultExpanded.has(String(ti)) }"
+                          />
+                          <span>{{ resultExpanded.has(String(ti)) ? '收起结果' : '查看结果' }}</span>
+                        </button>
+                        <Transition name="timeline-result">
+                          <pre v-show="resultExpanded.has(String(ti))" class="timeline__result-body">{{ clip(t.result, 1200) }}</pre>
+                        </Transition>
+                      </div>
                     </div>
                   </div>
                 </li>
