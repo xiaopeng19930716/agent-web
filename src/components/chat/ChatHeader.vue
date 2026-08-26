@@ -1,6 +1,6 @@
 <script setup>
 import { ref, nextTick } from 'vue'
-import { GitCompare, MessageSquareText, Download, Eraser, Terminal, FileEdit } from 'lucide-vue-next'
+import { GitBranch, MessageSquareText, Download, Eraser, Terminal, FileEdit, EllipsisVertical } from 'lucide-vue-next'
 import { Modal, message } from 'ant-design-vue'
 import { updateSession } from '../../sessions.js'
 
@@ -109,58 +109,60 @@ function clearChat() {
       title="双击修改会话名称"
       @dblclick="startRenameTitle"
     >{{ activeSession.title || '新对话' }}</span>
-    <a-button
-      class="chat__head-btn"
-      size="small"
-      title="查看文件变更"
-      :type="showChanges ? 'primary' : 'default'"
-      @click="emit('update:show-changes', !showChanges)"
-    >
-      <template #icon><GitCompare :size="14" /></template>
-    </a-button>
-    <a-button
-      class="chat__head-btn"
-      size="small"
-      title="对话日志"
-      @click="emit('open-log')"
-    >
-      <template #icon><MessageSquareText :size="14" /></template>
-    </a-button>
-    <a-dropdown>
-      <a-button class="chat__head-btn" size="small" title="导出对话">
-        <template #icon><Download :size="14" /></template>
+    <div class="chat__head-tools">
+      <a-button
+        class="chat__head-btn"
+        size="small"
+        title="本机终端"
+        @click="emit('open-terminal')"
+      >
+        <template #icon><Terminal :size="14" /></template>
       </a-button>
-      <template #overlay>
-        <a-menu>
-          <a-menu-item key="md" @click="exportChat('md')">导出为 Markdown</a-menu-item>
-          <a-menu-item key="json" @click="exportChat('json')">导出为 JSON</a-menu-item>
-        </a-menu>
-      </template>
-    </a-dropdown>
-    <a-button
-      class="chat__head-btn"
-      size="small"
-      title="本机终端"
-      @click="emit('open-terminal')"
-    >
-      <template #icon><Terminal :size="14" /></template>
-    </a-button>
-    <a-button
-      class="chat__head-btn"
-      size="small"
-      title="本机编辑器"
-      @click="emit('open-editor')"
-    >
-      <template #icon><FileEdit :size="14" /></template>
-    </a-button>
-    <a-button
-      class="chat__head-btn"
-      size="small"
-      title="清空对话"
-      @click="clearChat"
-    >
-      <template #icon><Eraser :size="14" /></template>
-    </a-button>
+      <a-button
+        class="chat__head-btn"
+        size="small"
+        title="本机编辑器"
+        @click="emit('open-editor')"
+      >
+        <template #icon><FileEdit :size="14" /></template>
+      </a-button>
+      <span class="chat__head-divider"></span>
+      <a-button
+        class="chat__head-btn"
+        size="small"
+        title="查看文件变更"
+        :type="showChanges ? 'primary' : 'default'"
+        @click="emit('update:show-changes', !showChanges)"
+      >
+        <template #icon><GitBranch :size="14" /></template>
+      </a-button>
+      <a-button
+        class="chat__head-btn"
+        size="small"
+        title="对话日志"
+        @click="emit('open-log')"
+      >
+        <template #icon><MessageSquareText :size="14" /></template>
+      </a-button>
+      <a-dropdown>
+        <a-button class="chat__head-btn" size="small" title="更多">
+          <template #icon><EllipsisVertical :size="14" /></template>
+        </a-button>
+        <template #overlay>
+          <a-menu>
+            <a-menu-item key="md" @click="exportChat('md')">
+              <span class="chat__menu-row"><Download :size="14" />导出为 Markdown</span>
+            </a-menu-item>
+            <a-menu-item key="json" @click="exportChat('json')">
+              <span class="chat__menu-row"><Download :size="14" />导出为 JSON</span>
+            </a-menu-item>
+            <a-menu-item key="clear" danger @click="clearChat">
+              <span class="chat__menu-row"><Eraser :size="14" />清空对话</span>
+            </a-menu-item>
+          </a-menu>
+        </template>
+      </a-dropdown>
+    </div>
   </div>
 </template>
 
@@ -172,11 +174,25 @@ function clearChat() {
   min-height: 40px;
   flex-shrink: 0;
 }
-.chat__head-btn {
-  margin-left: 8px;
-}
-.chat__head-btn:first-of-type {
+.chat__head-tools {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chat__head-btn {
+  margin-left: 0;
+}
+.chat__head-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--color-border);
+  margin: 0 4px;
+}
+.chat__menu-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .chat__titlebar-text {
   font-size: 15px;
