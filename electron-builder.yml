@@ -6,6 +6,9 @@ directories:
   output: release
   buildResources: build
 
+# 应用图标（Windows 用 icon.ico，Mac 用 icon.icns）；放 buildResources 下会被自动发现，这里显式指定更稳妥
+icon: electron/build/icon.ico
+
 # 鎵撳寘鍖呭惈鐨勫唴瀹癸細娓叉煋浜х墿銆佸悗绔€佷富杩涚▼/棰勫姞杞芥瀯寤轰骇鐗┿€佷緷璧?
 # 娉ㄦ剰锛氫笉瑕佸啓 node_modules/**/*锛屽惁鍒欎細鎶?vite/electron 绛?devDependencies 鍏ㄦ墦杩?asar锛?
 # 瀵艰嚧瀹夎鍖呭法澶с€佸畨瑁呰В鍘嬫瀬鎱€€俥lectron-builder 榛樿鍙墦鍖?dependencies 涓殑鐢熶骇渚濊禆銆?
