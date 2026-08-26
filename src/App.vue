@@ -1,6 +1,8 @@
 <template>
   <a-config-provider :theme="antdTheme">
     <div class="app">
+    <TitleBar />
+    <div class="app__body">
     <aside class="sidebar">
       <button class="new-chat" @click="onNewChat">
         <Plus :size="16" />
@@ -127,6 +129,7 @@
       <RouterView />
     </main>
     </div>
+    </div>
   </a-config-provider>
 </template>
 
@@ -135,6 +138,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRouter, useRoute } from 'vue-router'
 import { theme as antdThemeTokens } from 'ant-design-vue'
 import { Plus, Search, Settings, MessageSquare, Archive, Trash2, Sun, Moon, BarChart3 } from 'lucide-vue-next'
+import TitleBar from './components/TitleBar.vue'
 import { projects, activeProjectId, removeProject, fetchProjects } from './projects.js'
 import { createSession, fetchSessions, deleteSession, archiveSession, updateSession, sessions, NO_PROJECT_KEY } from './sessions.js'
 import { emitBus } from './bus.js'
@@ -389,8 +393,15 @@ watch(
 <style scoped lang="less">
 .app {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   background: var(--color-bg);
+}
+.app__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  height: 100%;
 }
 .sidebar {
   width: 280px;
@@ -669,7 +680,7 @@ watch(
 .main {
   flex: 1;
   min-width: 0;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
 }
 </style>

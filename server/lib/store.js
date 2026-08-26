@@ -5,7 +5,11 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // 项目存储（后端信任的唯一路径来源，防止前端越权访问任意目录）
-export const DATA_DIR = join(__dirname, '..', 'data')
+// 打包环境下（Electron）由主进程通过 CODE_AGENT_DATA_DIR 指到可写的 userData 目录，
+// 避免写入只读的 asar 包内；未设置时回退到开发用的 server/data。
+export const DATA_DIR = process.env.CODE_AGENT_DATA_DIR
+  ? join(process.env.CODE_AGENT_DATA_DIR)
+  : join(__dirname, '..', 'data')
 export const PROJECTS_FILE = join(DATA_DIR, 'projects.json')
 /** @type {Map<string, {id:string, alias:string, path:string, modelId?:string}>} */
 export const projects = new Map()

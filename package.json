@@ -3,13 +3,18 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "out/main.cjs",
   "scripts": {
     "dev:all": "concurrently -n web,api -c cyan,green \"npm run dev\" \"npm run server:watch\"",
     "dev": "vite --open",
     "server": "node server/index.js",
     "server:watch": "nodemon --watch server --ext js,json --ignore server/data --ignore server/node_modules server/index.js",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:dev": "electron-vite dev",
+    "electron:build": "electron-vite build && electron-builder --config electron-builder.yml",
+    "electron:build:win": "electron-vite build && electron-builder --win --config electron-builder.yml",
+    "electron:build:mac": "electron-vite build && electron-builder --mac --config electron-builder.yml"
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",
@@ -32,6 +37,9 @@
     "concurrently": "^10.0.5",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "electron-vite": "6.0.0-beta.1",
     "express": "^4.19.2",
     "less": "^4.9.0",
     "nodemon": "^3.1.14",

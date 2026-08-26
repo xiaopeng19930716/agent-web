@@ -44,6 +44,18 @@
 - 已去掉顶部三张汇总卡片（用户要求）。模型名友好化：vendorKey/modelId → 厂商名/模型名。
 - 调用次数图已按用户要求改为「按厂商」展示。
 
+## Electron 桌面打包方案（2026-08-26 决策 + 落地）
+- **目标平台**：主要 Windows，兼顾 macOS（Intel x64 + Apple Silicon arm64）。
+- **当前约束**：无 Apple Developer 账号、无 Windows 代码签名证书 → Windows 安装包有 SmartScreen 警告可继续；macOS 包无法公证、Gatekeeper 会拦，仅能本机/信任设备自测，不能正常分发。证书配置位已留好，将来补证书即可。
+- **构建选型**：`electron-vite`（复用现有 Vite 配置）+ `electron-builder`，**不做自动更新**（electron-updater 可后续接入）。
+- **后端处理**：主进程 `fork` 子进程拉起 `server/index.js`（复用 Electron 内置 Node，无需外部 node 二进制）；前端保持 `/api` 相对路径不变，prod 下 Express 同时托管 `dist` 静态（SPA fallback），BrowserWindow 直接 `loadURL(http://localhost:PORT)`，开发模式仍走 Vite dev server（DEV_URL）。
+- **Key 策略**：用户已在设置面板自配（存 `~/.code-agent/models.json`），打包**无需**额外 Key 注入逻辑。
+- **持久化解耦（方案 X）**：`server/lib/store.js` 的 `DATA_DIR` 优先读 `process.env.CODE_AGENT_DATA_DIR`，回退开发用 `server/data`；主进程打包时设 `CODE_AGENT_DATA_DIR = app.getPath('userData')/code-agent-data`，规避 asar 只读。
+- **端口**：`config.js` PORT 默认 3001；主进程 `findFreePort` 探测空闲端口并设 `process.env.PORT` 传给子进程（server `listenWithFallback` 兜底 +1）。
+- **asar**：`asar:true` + `asarUnpack: server/**`、`node_modules/**`（ESM server 不能从 asar 内动态加载，必须解包）；dist 留在 asar 内供 Express 只读读取。
+- **新增文件**：`electron/main.js`（fork 拉后端+建窗口）、`electron/preload.js`（contextBridge 暴露 isElectron/backendPort）、`electron.vite.config.js`（main/preload/renderer 三端）、`electron-builder.yml`（win nsis + mac dmg x64/arm64）。
+- **package.json 改动**：加 `main: out/main.js`、electron 相关 devDeps、脚本 `electron:dev`/`electron:build`(+`:win`/`:mac`)。网页版 `npm run dev:all` 流程不受影响。
+
 ## 关键约束（来自历史 bug）
 - MessageList.vue 编辑 `.timeline__result-body` 等样式块时，old_str 必须覆盖完整属性块，否则剩余属性会脱离选择器成裸属性导致 Less 编译报错「missing opening '{'」。
 - 工具重试按钮：仅失败工具显示（isToolFailed 正则匹配 result 文本错误/失败/拒绝/超时），放在头部状态标签「完成」左侧，文字「重试」；失败工具状态标签显示红色「失败」而非「完成」。

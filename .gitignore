@@ -20,6 +20,9 @@ dist-ssr
 # 临时上传的图片（#9 图像理解，运行时生成）
 server/.uploads
 
+# Electron 开发模式后端动态端口记录（运行时生成）
+.api-port
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

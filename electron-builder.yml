@@ -1,0 +1,56 @@
+appId: com.codeagent.app
+productName: Code Agent
+copyright: Copyright © 2026
+
+directories:
+  output: release
+  buildResources: build
+
+# 打包包含的内容：渲染产物、后端、主进程/预加载构建产物、依赖
+files:
+  - dist/**/*
+  - out/**/*
+  - server/**/*
+  - package.json
+  - node_modules/**/*
+
+# asar 打包，但把后端与依赖解包到 app.asar.unpacked，
+# 以便主进程 fork 出的子进程能正常加载 ESM server（asar 内不支持 ESM 动态加载）
+asar: true
+asarUnpack:
+  - server/**/*
+  - node_modules/**/*
+
+win:
+  target:
+    - nsis
+  # 未配置代码签名证书：SmartScreen 会提示未知发布者，用户点"仍要运行"即可安装
+  # 如需去除警告，配置 certificateFile / certificatePassword 后取消注释：
+  # sign: ''
+  artifactName: ${productName}-${version}-setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+
+mac:
+  # 未配置 Apple Developer 证书与公证：生成的 dmg 仅供本机/信任设备自测，
+  # 普通用户会被 Gatekeeper 拦截。配置 identity + 开启 notarize 后可正常分发。
+  target:
+    - dmg
+  category: public.app-category.developer-tools
+  # 同时构建 Intel 与 Apple Silicon
+  arch:
+    - x64
+    - arm64
+  # identity: null  # 自签名/无签名
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+dmg:
+  title: ${productName} ${version}
+
+# 自动更新暂不启用（electron-updater 可后续接入）
