@@ -6,16 +6,17 @@ directories:
   output: release
   buildResources: build
 
-# 打包包含的内容：渲染产物、后端、主进程/预加载构建产物、依赖
+# 打包包含的内容：渲染产物、后端、主进程/预加载构建产物、依�?
+# 注意：不要写 node_modules/**/*，否则会�?vite/electron �?devDependencies 全打�?asar�?
+# 导致安装包巨大、安装解压极慢。electron-builder 默认只打�?dependencies 中的生产依赖�?
 files:
   - dist/**/*
   - out/**/*
   - server/**/*
   - package.json
-  - node_modules/**/*
 
-# asar 打包，但把后端与依赖解包到 app.asar.unpacked，
-# 以便主进程 fork 出的子进程能正常加载 ESM server（asar 内不支持 ESM 动态加载）
+# asar 打包，但把后端与依赖解包�?app.asar.unpacked�?
+# 以便主进�?fork 出的子进程能正常加载 ESM server（asar 内不支持 ESM 动态加载）
 asar: true
 asarUnpack:
   - server/**/*
@@ -24,9 +25,9 @@ asarUnpack:
 win:
   target:
     - nsis
-  # 跳过代码签名（未配置证书）：直接产出未签名安装包，
-  # 用户安装时 SmartScreen 会提示未知发布者，点"仍要运行"即可。
-  # 同时避免 electron-builder 去 GitHub 拉取 winCodeSign 二进制。
+  # 跳过代码签名（未配置证书）：直接产出未签名安装包�?
+  # 用户安装�?SmartScreen 会提示未知发布者，�?仍要运行"即可�?
+  # 同时避免 electron-builder �?GitHub 拉取 winCodeSign 二进制�?
   sign: null
   artifactName: ${productName}-${version}-setup.${ext}
 
@@ -35,17 +36,24 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
+  # 自定义脚本：默认展开"安装细节"窗格，显示实时解�?复制进度
+  include: build/installer.nsh
+  # �?zip 而非 LZMA 压缩，解压速度更快，安装更顺滑
+  useZip: true
+  displayLanguageSelector: false
+  # 卸载时一并清理用户数据目录（按需，谨慎：会删除会话等数据�?
+  # deleteAppDataOnUninstall: true
 
 mac:
-  # 未配置 Apple Developer 证书与公证：生成的 dmg 仅供本机/信任设备自测，
-  # 普通用户会被 Gatekeeper 拦截。配置 identity + 开启 notarize 后可正常分发。
+  # 未配�?Apple Developer 证书与公证：生成�?dmg 仅供本机/信任设备自测�?
+  # 普通用户会�?Gatekeeper 拦截。配�?identity + 开�?notarize 后可正常分发�?
   target:
     - target: dmg
       arch:
         - x64
         - arm64
   category: public.app-category.developer-tools
-  # identity: null  # 自签名/无签名
+  # identity: null  # 自签�?无签�?
   hardenedRuntime: true
   gatekeeperAssess: false
   artifactName: ${productName}-${version}-${arch}.${ext}

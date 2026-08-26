@@ -12,7 +12,7 @@ function resolveApiPort() {
     const p = readFileSync(new URL('./.api-port', import.meta.url), 'utf-8').trim()
     if (p && /^\d+$/.test(p)) return p
   } catch {}
-  return '3001'
+  return '37821'
 }
 
 // electron-vite 配置：主进程 / 预加载 / 渲染进程 三个构建管线

@@ -13,7 +13,7 @@ export const DASHSCOPE_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1
 // 不读取环境变量，避免密钥泄露。以下默认值仅为回退，不来自 .env。
 export const API_KEY = ''
 export const DEFAULT_MODEL = 'qwen-coder-plus'
-export const PORT = process.env.PORT || 3001
+export const PORT = process.env.PORT || 37821
 
 // 用户全局存储统一放在 ~/.code-agent 下，按职责分目录：
 //   config/  —— 配置文件（models.json / mcp.json / settings.json / import-paths.json）

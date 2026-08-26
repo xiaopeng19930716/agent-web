@@ -46,31 +46,67 @@ function findFreePort(preferred = 3001) {
 var backendPort = null;
 var backendChild = null;
 var mainWindow = null;
+var backendExited = false;
+function waitForBackend(port, timeoutMs = 15e3) {
+	return new Promise((resolve, reject) => {
+		const start = Date.now();
+		const tryConnect = () => {
+			if (backendExited) {
+				reject(/* @__PURE__ */ new Error("后端进程已退出"));
+				return;
+			}
+			if (Date.now() - start > timeoutMs) {
+				reject(/* @__PURE__ */ new Error(`后端在 ${timeoutMs}ms 内未启动，端口 ${port} 无法连接`));
+				return;
+			}
+			const sock = node_net.default.createConnection({
+				port,
+				host: "127.0.0.1"
+			}, () => {
+				sock.end();
+				resolve();
+			});
+			sock.setTimeout(300);
+			sock.on("error", () => {
+				sock.destroy();
+				setTimeout(tryConnect, 300);
+			});
+			sock.on("timeout", () => {
+				sock.destroy();
+				setTimeout(tryConnect, 300);
+			});
+		};
+		tryConnect();
+	});
+}
 async function startBackend() {
 	const dataDir = (0, path.join)(node_os.default.homedir(), ".code-agent");
 	process.env.CODE_AGENT_DATA_DIR = dataDir;
-	backendPort = isDev ? await findFreePort(3001) : 3001;
+	backendPort = await findFreePort(37821);
 	process.env.PORT = String(backendPort);
 	if (isDev) (0, fs.writeFileSync)((0, path.join)(appRoot, ".api-port"), String(backendPort), "utf-8");
-	if (isDev) {
-		const modulePath = (0, path.join)(appRoot, "server", "index.js");
-		backendChild = (0, node_child_process.spawn)(process.execPath, [modulePath], {
-			env: { ...process.env },
-			stdio: "inherit"
-		});
-		backendChild.on("error", (e) => console.error("[dev] 后端子进程启动失败（若已手动启动 server 可忽略）:", e.message));
-	} else {
-		const unpackedRoot = (0, path.join)(process.resourcesPath, "app.asar.unpacked");
+	const modulePath = isDev ? (0, path.join)(appRoot, "server", "index.js") : (0, path.join)(process.resourcesPath, "app.asar.unpacked", "server", "index.js");
+	if (!isDev) {
 		const distInAsar = (0, path.join)(process.resourcesPath, "app.asar", "dist");
 		const distLocal = (0, path.join)(appRoot, "dist");
 		process.env.SERVE_DIST = (0, fs.existsSync)(distInAsar) ? distInAsar : distLocal;
-		const modulePath = (0, path.join)(unpackedRoot, "server", "index.js");
-		backendChild = (0, node_child_process.spawn)(process.execPath, [modulePath], {
-			env: { ...process.env },
-			stdio: "inherit"
-		});
-		backendChild.on("error", (e) => console.error("[prod] 后端子进程启动失败:", e.message));
 	}
+	backendChild = (0, node_child_process.spawn)(process.execPath, [modulePath], {
+		env: { ...process.env },
+		stdio: "inherit"
+	});
+	backendChild.on("error", (e) => {
+		console.error("[main] 后端子进程启动失败:", e.message);
+	});
+	backendChild.on("exit", (code, signal) => {
+		backendExited = true;
+		console.error(`[main] 后端子进程退出 code=${code} signal=${signal}`);
+		if (mainWindow) {
+			electron.dialog.showErrorBox("后端服务异常退出", `Code Agent 后端已停止（code=${code}），应用即将关闭。`);
+			electron.app.quit();
+		} else electron.app.quit();
+	});
+	await waitForBackend(backendPort);
 }
 function createWindow() {
 	mainWindow = new electron.BrowserWindow({
@@ -90,10 +126,14 @@ function createWindow() {
 		mainWindow.loadURL(DEV_URL);
 		mainWindow.webContents.openDevTools({ mode: "detach" });
 	} else mainWindow.loadURL(`http://localhost:${backendPort}`);
-	mainWindow.once("ready-to-show", () => mainWindow.show());
+	mainWindow.once("ready-to-show", () => mainWindow?.show());
+	mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
+		console.error("[main] 窗口加载失败:", errorCode, errorDescription);
+		if (!isDev) electron.dialog.showErrorBox("页面加载失败", `${errorDescription}\n请检查后端服务是否正常运行。`);
+	});
 	mainWindow.on("closed", () => {
 		mainWindow = null;
-		if (backendChild) backendChild.kill();
+		if (backendChild && !backendChild.killed) backendChild.kill();
 	});
 }
 electron.app.whenReady().then(async () => {
@@ -106,16 +146,19 @@ electron.app.whenReady().then(async () => {
 	electron.ipcMain.on("window:close", () => mainWindow?.close());
 	try {
 		await startBackend();
+		createWindow();
 	} catch (e) {
-		electron.dialog.showErrorBox("后端启动失败", String(e.message || e));
+		console.error("[main] 启动失败:", e);
+		electron.dialog.showErrorBox("启动失败", String(e.message || e));
+		electron.app.quit();
 	}
-	createWindow();
 	electron.app.on("activate", () => {
+		if (backendExited) return;
 		if (electron.BrowserWindow.getAllWindows().length === 0) createWindow();
 	});
 });
 electron.app.on("window-all-closed", () => {
-	if (backendChild) backendChild.kill();
+	if (backendChild && !backendChild.killed) backendChild.kill();
 	if (process.platform !== "darwin") electron.app.quit();
 });
 //#endregion

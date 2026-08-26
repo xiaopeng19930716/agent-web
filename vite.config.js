@@ -12,7 +12,7 @@ function resolveApiPort() {
     const p = readFileSync(new URL('./.api-port', import.meta.url), 'utf-8').trim()
     if (p && /^\d+$/.test(p)) return p
   } catch {}
-  return '3001'
+  return '37821'
 }
 
 // https://vite.dev/config/
