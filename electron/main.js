@@ -87,7 +87,10 @@ async function startBackend() {
   }
 
   backendChild = spawn(process.execPath, [modulePath], {
-    env: { ...process.env },
+    // 关键：打包后 process.execPath 是 Code Agent.exe（Electron 二进制），
+    // 必须设置 ELECTRON_RUN_AS_NODE=1 才会以纯 Node 模式执行 server/index.js，
+    // 否则会当作 Electron 应用启动（打开新窗口），后端永远起不来。
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     stdio: 'inherit',
   })
 

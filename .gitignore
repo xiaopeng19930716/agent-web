@@ -24,6 +24,9 @@ server/.uploads
 # Electron 开发模式后端动态端口记录（运行时生成）
 .api-port
 
+# electron-vite 启动时生成的配置副本（每次 dev 会重写，不要提交）
+electron.vite.config.*.mjs
+
 # Electron 打包产物（release / release_build 目录由 electron-builder 生成）
 release
 release_build

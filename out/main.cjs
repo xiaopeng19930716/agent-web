@@ -92,7 +92,10 @@ async function startBackend() {
 		process.env.SERVE_DIST = (0, fs.existsSync)(distInAsar) ? distInAsar : distLocal;
 	}
 	backendChild = (0, node_child_process.spawn)(process.execPath, [modulePath], {
-		env: { ...process.env },
+		env: {
+			...process.env,
+			ELECTRON_RUN_AS_NODE: "1"
+		},
 		stdio: "inherit"
 	});
 	backendChild.on("error", (e) => {
