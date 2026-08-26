@@ -884,7 +884,7 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
     />
 
     <div class="chat__body" :style="{ gridTemplateColumns: gridCols }">
-      <div class="chat__conversation">
+      <div class="chat__conversation" :class="{ 'chat__conversation--todo-open': showTodos }">
         <div v-if="reconnecting" class="reconnect-bar">
           <span class="reconnect-bar__dot" />
           连接中断，正在重连（第 {{ reconnectInfo.attempt }} / {{ reconnectInfo.max }} 次）…

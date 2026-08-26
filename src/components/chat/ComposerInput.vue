@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from "vue";
-import { ArrowUp, Shield, Zap, AtSign, Hash, Square, ListTree, Image as ImageIcon, Loader2, X } from "lucide-vue-next";
+import { ArrowUp, Shield, Zap, Square, ListTree, Image as ImageIcon, Loader2, X } from "lucide-vue-next";
 import { settings, saveModels } from "../../settings.js";
 import { activeProjectId } from "../../projects.js";
 import { fetchFileTools, uploadImage } from "../../api/agent.js";
@@ -244,7 +244,8 @@ function onCmdKeydown(e) {
     if (atPanelRef.value) atPanelRef.value.onKeydown(e);
     return;
   }
-  // / 命令面板：方向键移动高亮，Enter 选择，Esc 关闭
+  // / 命令面板：仅拦截面板专用导航键（方向键/Enter/Esc），其余按键放行，
+  // 交由 onCmdInput 重新解析（否则会挡住 @ / 连续输入与 Backspace 删除）
   if (showCmdPanel.value) {
     const list = allCmdItems.value;
     if (e.key === "ArrowDown") {
@@ -262,9 +263,8 @@ function onCmdKeydown(e) {
     } else if (e.key === "Escape") {
       e.preventDefault();
       showCmdPanel.value = false;
-    } else {
-      e.preventDefault();
     }
+    // 其余按键（字母、@、/、Backspace、Delete 等）不拦截，让 input 事件继续解析
     return;
   }
   // 无面板：Enter 发送，Shift+Enter 换行
@@ -506,12 +506,6 @@ function onRingUp() {
       <div class="chat__input-footer">
         <div class="chat__footer-left">
           <div class="chat__quick-actions">
-            <button v-if="activeProjectId.id" type="button" class="chat__quick-btn" title="引用文件/目录" @click="insertText('@')">
-              <AtSign :size="14" />
-            </button>
-            <button type="button" class="chat__quick-btn" title="选择工具" @click="insertText('/')">
-              <Hash :size="14" />
-            </button>
             <button type="button" class="chat__quick-btn" title="上传图片 / 截图" @click="$refs.imageInput.click()">
               <ImageIcon :size="14" />
             </button>
@@ -606,7 +600,7 @@ function onRingUp() {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin: 0 16px 16px;
+  margin: 0 22px 16px;
   padding: 10px 14px 12px;
   background: var(--color-bg);
   border: 1px solid @color-border;

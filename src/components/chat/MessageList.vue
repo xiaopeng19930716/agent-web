@@ -573,7 +573,7 @@ defineExpose({ clearRetrying })
 .msg {
   position: relative;
   margin-bottom: 18px;
-  max-width: 88%;
+  max-width: calc(100% - 270px);
   display: flex;
   flex-direction: column;
   /* 头像占位变量定义在 .msg 层：.bubble 和 .msg__actions 是兄弟节点，
