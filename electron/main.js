@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import os from 'node:os'
 import { dirname, join } from 'path'
 import { existsSync, writeFileSync } from 'fs'
 import net from 'node:net'
@@ -28,8 +29,9 @@ let backendChild = null
 let mainWindow = null
 
 async function startBackend() {
-  // 数据目录：打包后写到 userData（可写），解耦 asar 只读限制（方案 X）
-  const dataDir = join(app.getPath('userData'), 'code-agent-data')
+  // 数据目录：统一存放到用户目录 ~/.code-agent，与网页版（models/mcp/settings）共享同一目录，
+  // 避免开发/打包/网页三端数据割裂；该目录可写，不受 asar 只读限制。
+  const dataDir = join(os.homedir(), '.code-agent')
   process.env.CODE_AGENT_DATA_DIR = dataDir
 
   // 开发模式：自动避开被占用的 3001，切到下一个空闲端口；

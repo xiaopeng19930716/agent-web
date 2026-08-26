@@ -21,7 +21,10 @@
 
 - 主进程 `spawn` 一个子进程拉起 `server/index.js`（复用 Electron 内置 Node，无需本机另装 Node）。注意：后端入口为 ESM，必须用 `spawn(process.execPath, [serverPath])` 而非 `fork`（`fork` 不支持 ESM 入口）。
 - 生产环境下 Express 同时托管前端 `dist` 并接管路由，渲染进程直接访问 `http://localhost:<端口>`，前端代码与网页版完全一致（请求仍走相对路径 `/api`）。
-- 数据持久化目录（项目/会话）在打包后写入用户目录（`userData/code-agent-data`），避免写入只读的 asar 包。
+- 用户数据统一存放在用户主目录 `~/.code-agent`，按职责分目录，网页版与 Electron 版共用（避免数据割裂，打包后该目录可写，不受 asar 只读限制）：
+  - `~/.code-agent/config/`：配置文件 `models.json` / `mcp.json` / `settings.json` / `import-paths.json`
+  - `~/.code-agent/data/`：数据文件 `sessions.json` / `projects.json` / `upload/`（用户上传图片）
+  - Electron 版可通过主进程 `CODE_AGENT_DATA_DIR` 环境变量整体覆盖根目录（如便携化）。
 
 > 平台支持：主要面向 Windows；macOS 同时构建 Intel(`x64`) 与 Apple Silicon(`arm64`)。
 > 当前仓库**未配置代码签名证书与 Apple 公证**：Windows 安装包会提示 SmartScreen 未知发布者（可继续安装）；macOS 包会被 Gatekeeper 拦截，仅能在已信任的开发机上自测。后续补证书即可正常分发。

@@ -21,6 +21,8 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 }) : target, mod));
 //#endregion
 let electron = require("electron");
+let node_os = require("node:os");
+node_os = __toESM(node_os, 1);
 let path = require("path");
 let fs = require("fs");
 let node_net = require("node:net");
@@ -45,7 +47,7 @@ var backendPort = null;
 var backendChild = null;
 var mainWindow = null;
 async function startBackend() {
-	const dataDir = (0, path.join)(electron.app.getPath("userData"), "code-agent-data");
+	const dataDir = (0, path.join)(node_os.default.homedir(), ".code-agent");
 	process.env.CODE_AGENT_DATA_DIR = dataDir;
 	backendPort = isDev ? await findFreePort(3001) : 3001;
 	process.env.PORT = String(backendPort);

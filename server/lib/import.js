@@ -5,6 +5,7 @@ import path from 'path'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { parseSkillFrontmatter } from './skills.js'
+import { CONFIG_DIR } from './config.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -88,8 +89,8 @@ export const IMPORT_SOURCE_DEFAULTS = [
   },
 ]
 
-// 用户覆盖的导入路径（持久化在 data/import-paths.json）
-const IMPORT_PATHS_FILE = join(__dirname, '..', 'data', 'import-paths.json')
+// 用户覆盖的导入路径（持久化在 ~/.code-agent/config/import-paths.json）
+const IMPORT_PATHS_FILE = join(CONFIG_DIR, 'import-paths.json')
 let importPathOverrides = {}
 export function loadImportPathOverrides() {
   try {

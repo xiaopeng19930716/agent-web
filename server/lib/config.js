@@ -15,12 +15,18 @@ export const API_KEY = ''
 export const DEFAULT_MODEL = 'qwen-coder-plus'
 export const PORT = process.env.PORT || 3001
 
-// 用户全局配置（持久化到用户主目录，避免存于浏览器 localStorage）
-// 模型相关配置与 MCP 配置独立存储，便于分离管理；其余（skills 等）留在 settings.json
-export const SETTINGS_DIR = join(os.homedir(), '.code-agent')
-export const MODELS_FILE = join(SETTINGS_DIR, 'models.json')
-export const MCP_FILE = join(SETTINGS_DIR, 'mcp.json')
-export const SETTINGS_FILE = join(SETTINGS_DIR, 'settings.json')
+// 用户全局存储统一放在 ~/.code-agent 下，按职责分目录：
+//   config/  —— 配置文件（models.json / mcp.json / settings.json / import-paths.json）
+//   data/    —— 数据文件（sessions.json / projects.json / upload/）
+// 网页版与 Electron 版共用；CODE_AGENT_DATA_DIR 可整体覆盖根目录（供 Electron 测试/便携化）。
+export const CODE_AGENT_ROOT = process.env.CODE_AGENT_DATA_DIR
+  ? join(process.env.CODE_AGENT_DATA_DIR)
+  : join(os.homedir(), '.code-agent')
+export const CONFIG_DIR = join(CODE_AGENT_ROOT, 'config')
+export const DATA_DIR = join(CODE_AGENT_ROOT, 'data')
+export const MODELS_FILE = join(CONFIG_DIR, 'models.json')
+export const MCP_FILE = join(CONFIG_DIR, 'mcp.json')
+export const SETTINGS_FILE = join(CONFIG_DIR, 'settings.json')
 
 // 读取某个配置文件，缺失或损坏返回 null（调用方据此回退默认值）
 export function readConfigFile(file) {
@@ -39,7 +45,7 @@ export function writeConfigFile(file, body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return false
   }
-  fs.mkdirSync(SETTINGS_DIR, { recursive: true })
+  fs.mkdirSync(CONFIG_DIR, { recursive: true })
   fs.writeFileSync(file, JSON.stringify(body, null, 2))
   return true
 }

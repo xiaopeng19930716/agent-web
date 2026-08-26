@@ -3,13 +3,14 @@ import { randomUUID } from 'crypto'
 import { extname, join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { mkdirSync, writeFileSync, existsSync, readFileSync, renameSync, copyFileSync, statSync } from 'fs'
-import os from 'os'
+import { DATA_DIR } from '../lib/store.js'
 import { projects } from '../lib/store.js'
 import { safeResolve } from '../lib/fileTools.js'
 
 const router = Router()
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const UPLOAD_DIR = join(__dirname, '..', '.uploads')
+// 用户上传图片统一存放到 ~/.code-agent/data/upload
+const UPLOAD_DIR = join(DATA_DIR, 'upload')
 
 // 确保临时上传目录存在
 if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true })

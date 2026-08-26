@@ -17,7 +17,8 @@ dist
 dist-ssr
 *.local
 
-# 临时上传的图片（#9 图像理解，运行时生成）
+# 旧开发数据目录（会话/上传等已统一迁至用户目录 ~/.code-agent，勿提交项目内残留）
+server/data
 server/.uploads
 
 # Electron 开发模式后端动态端口记录（运行时生成）
