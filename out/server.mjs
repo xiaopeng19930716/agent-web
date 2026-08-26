@@ -22708,7 +22708,7 @@ var require_view = __commonJS({
     var path8 = __require("path");
     var fs8 = __require("fs");
     var dirname7 = path8.dirname;
-    var basename2 = path8.basename;
+    var basename3 = path8.basename;
     var extname2 = path8.extname;
     var join7 = path8.join;
     var resolve = path8.resolve;
@@ -22747,7 +22747,7 @@ var require_view = __commonJS({
         var root = roots[i];
         var loc = resolve(root, name);
         var dir = dirname7(loc);
-        var file2 = basename2(loc);
+        var file2 = basename3(loc);
         path9 = this.resolve(dir, file2);
       }
       return path9;
@@ -22763,7 +22763,7 @@ var require_view = __commonJS({
       if (stat3 && stat3.isFile()) {
         return path9;
       }
-      path9 = join7(dir, basename2(file2, ext), "index" + ext);
+      path9 = join7(dir, basename3(file2, ext), "index" + ext);
       stat3 = tryStat(path9);
       if (stat3 && stat3.isFile()) {
         return path9;
@@ -22844,7 +22844,7 @@ var require_content_disposition = __commonJS({
     "use strict";
     module.exports = contentDisposition;
     module.exports.parse = parse9;
-    var basename2 = __require("path").basename;
+    var basename3 = __require("path").basename;
     var Buffer2 = require_safe_buffer().Buffer;
     var ENCODE_URL_ATTR_CHAR_REGEXP = /[\x00-\x20"'()*,/:;<=>?@[\\\]{}\x7f]/g;
     var HEX_ESCAPE_REGEXP = /%[0-9A-Fa-f]{2}/;
@@ -22880,9 +22880,9 @@ var require_content_disposition = __commonJS({
       if (typeof fallback === "string" && NON_LATIN1_REGEXP.test(fallback)) {
         throw new TypeError("fallback must be ISO-8859-1 string");
       }
-      var name = basename2(filename);
+      var name = basename3(filename);
       var isQuotedString = TEXT_REGEXP.test(name);
-      var fallbackName = typeof fallback !== "string" ? fallback && getlatin1(name) : basename2(fallback);
+      var fallbackName = typeof fallback !== "string" ? fallback && getlatin1(name) : basename3(fallback);
       var hasFallback = typeof fallbackName === "string" && fallbackName !== name;
       if (hasFallback || !isQuotedString || HEX_ESCAPE_REGEXP.test(name)) {
         params["filename*"] = name;
@@ -29116,7 +29116,7 @@ var import_cors = __toESM(require_lib4(), 1);
 var import_dotenv2 = __toESM(require_main(), 1);
 import { dirname as dirname6, join as join6 } from "path";
 import { fileURLToPath as fileURLToPath6 } from "url";
-import { existsSync as existsSync5 } from "fs";
+import { existsSync as existsSync5, writeFileSync as writeFileSync5 } from "fs";
 
 // server/lib/store.js
 import fs2 from "fs";
@@ -29128,7 +29128,7 @@ import { fileURLToPath as fileURLToPath2 } from "url";
 var import_dotenv = __toESM(require_main(), 1);
 import fs from "fs";
 import os2 from "os";
-import { dirname, join } from "path";
+import { dirname, join, basename } from "path";
 import { fileURLToPath } from "url";
 var __dirname = dirname(fileURLToPath(import.meta.url));
 (0, import_dotenv.config)({ path: join(__dirname, "..", "..", ".env") });
@@ -29141,12 +29141,24 @@ var DATA_DIR = join(CODE_AGENT_ROOT, "data");
 var MODELS_FILE = join(CONFIG_DIR, "models.json");
 var MCP_FILE = join(CONFIG_DIR, "mcp.json");
 var SETTINGS_FILE = join(CONFIG_DIR, "settings.json");
+function legacyConfigPath(file2) {
+  return join(CODE_AGENT_ROOT, basename(file2));
+}
 function readConfigFile(file2) {
   try {
     if (fs.existsSync(file2)) {
       return JSON.parse(fs.readFileSync(file2, "utf-8"));
     }
   } catch {
+  }
+  const legacy = legacyConfigPath(file2);
+  if (legacy !== file2) {
+    try {
+      if (fs.existsSync(legacy)) {
+        return JSON.parse(fs.readFileSync(legacy, "utf-8"));
+      }
+    } catch {
+    }
   }
   return null;
 }
@@ -29157,6 +29169,21 @@ function writeConfigFile(file2, body) {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(file2, JSON.stringify(body, null, 2));
   return true;
+}
+function migrateLegacyConfig() {
+  for (const file2 of [MODELS_FILE, MCP_FILE, SETTINGS_FILE]) {
+    const legacy = legacyConfigPath(file2);
+    if (legacy === file2) continue;
+    if (fs.existsSync(legacy) && !fs.existsSync(file2)) {
+      try {
+        fs.mkdirSync(CONFIG_DIR, { recursive: true });
+        fs.renameSync(legacy, file2);
+        console.log(`[\u8FC1\u79FB] \u5DF2\u5C06\u65E7\u7248\u914D\u7F6E ${basename(legacy)} \u79FB\u5165 config/`);
+      } catch (e) {
+        console.warn(`[\u8FC1\u79FB] \u79FB\u52A8 ${basename(legacy)} \u5931\u8D25:`, e.message);
+      }
+    }
+  }
 }
 
 // server/lib/store.js
@@ -99590,20 +99617,20 @@ function getName2(value, options) {
   }
   const explicitName = "name" in value && value.name && String(value.name) || "filename" in value && value.filename && String(value.filename);
   if (explicitName) {
-    return options?.stripFilename === false ? normalizeFilenamePath(explicitName) : basename(explicitName);
+    return options?.stripFilename === false ? normalizeFilenamePath(explicitName) : basename2(explicitName);
   }
   const url4 = "url" in value && value.url && String(value.url);
   if (url4) {
     try {
-      return basename(new URL(url4).pathname);
+      return basename2(new URL(url4).pathname);
     } catch {
-      return basename(url4);
+      return basename2(url4);
     }
   }
   const path8 = "path" in value && value.path && String(value.path);
-  return path8 ? basename(path8) : void 0;
+  return path8 ? basename2(path8) : void 0;
 }
-function basename(value) {
+function basename2(value) {
   return value.split(/[\\/]/).pop() || void 0;
 }
 function normalizeFilenamePath(value) {
@@ -121740,6 +121767,7 @@ var app = (0, import_express11.default)();
 app.use((0, import_cors.default)());
 app.use(import_express11.default.json({ limit: "10mb" }));
 initStores();
+migrateLegacyConfig();
 app.use("/api", projects_default);
 app.use("/api", sessions_default);
 app.use("/api", settings_default);
@@ -121765,6 +121793,11 @@ function listenWithFallback(port, tries = 0) {
   }
   const server = app.listen(port, () => {
     console.log(`Code Agent \u540E\u7AEF\u5DF2\u542F\u52A8: http://localhost:${port}`);
+    try {
+      writeFileSync5(join6(__dirname6, "..", ".api-port"), String(port), "utf-8");
+    } catch (e) {
+      console.warn("\u5199\u5165 .api-port \u5931\u8D25:", e.message);
+    }
   });
   server.on("error", (err) => {
     if (err.code === "EADDRINUSE") {

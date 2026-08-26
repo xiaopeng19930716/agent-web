@@ -1,5 +1,7 @@
 appId: com.codeagent.app
 productName: Code Agent
+# 可执行文件名不能含空格，否则 rcedit 写入版本资源时报 "Unable to commit changes"
+executableName: code-agent
 copyright: Copyright 漏 2026
 
 directories:
