@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from "vue";
-import { Plus, ArrowUp, Shield, Zap, AtSign, Hash, FolderOpen, Square, ListTree, Image as ImageIcon, Loader2, X } from "lucide-vue-next";
+import { ArrowUp, Shield, Zap, AtSign, Hash, Square, ListTree, Image as ImageIcon, Loader2, X } from "lucide-vue-next";
 import { settings, saveModels } from "../../settings.js";
 import { activeProjectId } from "../../projects.js";
 import { fetchFileTools, uploadImage } from "../../api/agent.js";
@@ -21,7 +21,7 @@ const props = defineProps({
   // 上下文用量：{ usedTokens, contextWindow, pct, modelName } —— 父组件 ChatPanel 传入
   contextUsage: { type: Object, default: () => ({ usedTokens: 0, contextWindow: 32768, pct: 0, modelName: '' }) },
 });
-const emit = defineEmits(["send", "stop", "open-add", "new-project-chat", "manual-compress"]);
+const emit = defineEmits(["send", "stop", "open-add", "manual-compress"]);
 
 // ===== 富文本输入框（contenteditable）=====
 const composerTokens = ref([]); // [{ type:'text', text } | { type:'tag', kind, key, label }]
@@ -462,24 +462,6 @@ function onRingUp() {
 
 <template>
   <div class="chat__composer">
-    <div class="chat__input-header">
-      <div class="chat__context-group" role="group" aria-label="当前会话上下文">
-        <span class="chat__project-badge" :title="active?.path || '通用对话'">
-          <FolderOpen v-if="active" :size="13" class="chat__project-icon" />
-          <span v-else class="chat__project-dot"></span>
-          <span class="chat__project-label">{{ active?.alias || "通用对话" }}</span>
-        </span>
-        <button
-          type="button"
-          class="chat__newproj"
-          aria-label="新建会话"
-          title="新建会话"
-          @click="emit('new-project-chat')"
-        >
-          <Plus :size="14" />
-        </button>
-      </div>
-    </div>
     <div class="chat__input">
       <ComposerAtPanel
         v-if="showAtPanel"
@@ -618,74 +600,6 @@ function onRingUp() {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-.chat__input-header {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 16px;
-  min-height: 32px;
-}
-.chat__context-group {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid @color-border;
-  border-radius: 999px;
-  background: var(--color-bg);
-  overflow: hidden;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-}
-.chat__project-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 180px;
-  padding: 5px 12px;
-  border-right: 1px solid @color-border;
-  background: var(--color-bg-subtle);
-  color: @color-text;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: default;
-  user-select: none;
-}
-.chat__project-icon {
-  flex-shrink: 0;
-  color: @color-text-muted;
-}
-.chat__project-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: @color-text-muted;
-  flex-shrink: 0;
-}
-.chat__project-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chat__newproj {
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: transparent;
-  color: @color-text-muted;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.chat__newproj:hover {
-  background: @color-primary;
-  color: #fff;
-}
-.chat__newproj:focus-visible,
-.chat__context-group:focus-within {
-  outline: 2px solid @color-primary;
-  outline-offset: -2px;
 }
 .chat__input {
   position: relative;

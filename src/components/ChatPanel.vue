@@ -276,14 +276,6 @@ async function switchProject(pid) {
   }
 }
 
-// 在输入框上方新增会话：有项目则创建项目对话，否则创建通用对话
-async function newProjectChat() {
-  const pid = active.value?.id || NO_PROJECT_KEY
-  if (pid === NO_PROJECT_KEY) activeProjectId.id = ''
-  const session = await createSession(pid)
-  if (session?.id) router.push('/chat/' + session.id)
-}
-
 function openAdd() {
   showAdd.value = true
 }
@@ -945,7 +937,6 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
           @send="send"
           @stop="stopGeneration"
           @open-add="openAdd"
-          @new-project-chat="newProjectChat"
           @manual-compress="onManualCompress"
         />
       </div>
