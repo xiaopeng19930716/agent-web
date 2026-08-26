@@ -1,6 +1,6 @@
 <script setup>
 import { ref, nextTick } from 'vue'
-import { GitCompare, ListTodo, MessageSquareText, Download, Eraser } from 'lucide-vue-next'
+import { GitCompare, MessageSquareText, Download, Eraser } from 'lucide-vue-next'
 import { Modal, message } from 'ant-design-vue'
 import { updateSession } from '../../sessions.js'
 
@@ -8,9 +8,8 @@ const props = defineProps({
   activeSession: { type: Object, default: null },
   projectId: { type: String, default: '' },
   showChanges: { type: Boolean, default: false },
-  showTodos: { type: Boolean, default: false },
 })
-const emit = defineEmits(['open-log', 'update:show-changes', 'update:show-todos', 'clear-chat'])
+const emit = defineEmits(['open-log', 'update:show-changes', 'clear-chat'])
 
 const editingTitle = ref(false)
 const titleDraft = ref('')
@@ -118,15 +117,6 @@ function clearChat() {
       @click="emit('update:show-changes', !showChanges)"
     >
       <template #icon><GitCompare :size="14" /></template>
-    </a-button>
-    <a-button
-      class="chat__head-btn"
-      size="small"
-      title="任务清单"
-      :type="showTodos ? 'primary' : 'default'"
-      @click="emit('update:show-todos', !showTodos)"
-    >
-      <template #icon><ListTodo :size="14" /></template>
     </a-button>
     <a-button
       class="chat__head-btn"

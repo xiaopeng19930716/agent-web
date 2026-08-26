@@ -31,7 +31,7 @@ import ChatHeader from './chat/ChatHeader.vue'
 import MessageList from './chat/MessageList.vue'
 import SubAgentPanel from './chat/SubAgentPanel.vue'
 import SessionChanges from './chat/SessionChanges.vue'
-import TodoPanel from './chat/TodoPanel.vue'
+
 import ComposerInput from './chat/ComposerInput.vue'
 import AddProjectModal from './chat/AddProjectModal.vue'
 import { confirmToolCall, abortChat } from '../api/agent.js'
@@ -876,10 +876,8 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
       :active-session="activeSession"
       :project-id="activeProjectId.id || ''"
       :show-changes="showChanges"
-      :show-todos="showTodos"
       @open-log="showLog = true"
       @update:show-changes="showChanges = $event"
-      @update:show-todos="showTodos = $event"
       @clear-chat="onClearChat"
     />
 
@@ -922,10 +920,13 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
           :active="active"
           :error="error"
           :project-id="activeProjectId.id || ''"
+          :session="activeSession"
+          :show-todos="showTodos"
           @rollback="rollbackTo"
           @regenerate="regenerate"
           @retryTool="onRetryTool"
           @open-subagent="activeSubView = $event"
+          @update:show-todos="showTodos = $event"
         />
         <SubAgentPanel v-else :sub="activeSubAgent" @back="activeSubView = null" />
         <ComposerInput
@@ -952,16 +953,6 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
         </transition>
       </div>
     </div>
-
-    <!-- 任务清单悬浮层：ChatHeader 下方、浏览器右上方；有任务时自动显示，用户可关闭 -->
-    <transition name="todo-float">
-      <TodoPanel
-        v-if="showTodos"
-        class="chat__todo-float"
-        :session="activeSession"
-        @close="showTodos = false"
-      />
-    </transition>
 
     <AddProjectModal
       :show="showAdd"
@@ -1037,6 +1028,7 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
 }
 /* 会话区本身纵向排布：消息列表在上，输入框在下 */
 .chat__conversation {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -1048,38 +1040,6 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
   overflow: hidden;
   min-width: 0;
   display: flex;
-}
-/* 任务清单悬浮层：固定在 ChatHeader 下方、浏览器右上方 */
-.chat__todo-float {
-  position: absolute;
-  top: 50px;
-  right: 0;
-  width: 300px;
-  max-height: 60vh;
-  z-index: 40;
-  border: 1px solid var(--color-border, #e5e7eb);
-  border-right: none;
-  border-radius: 10px 0 0 10px;
-  background: var(--color-bg, #fff);
-  box-shadow: -4px 8px 24px rgba(0, 0, 0, 0.12);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-/* 悬浮层进出场：下滑 + 淡入 */
-.todo-float-enter-active,
-.todo-float-leave-active {
-  transition: transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.26s ease;
-}
-.todo-float-enter-from,
-.todo-float-leave-to {
-  transform: translateX(16px);
-  opacity: 0;
-}
-.todo-float-enter-to,
-.todo-float-leave-from {
-  transform: translateX(0);
-  opacity: 1;
 }
 /* 变更区内部淡入，避免内容瞬间出现 */
 .changes-fade-enter-active,

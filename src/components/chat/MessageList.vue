@@ -6,6 +6,7 @@ import 'highlight.js/styles/github-dark.css'
 import { ChevronDown, ChevronUp, Check, Loader2, Copy, ArrowDown, Undo2, Redo2, Timer, User, ListTree, FileDown } from 'lucide-vue-next'
 import { message } from 'ant-design-vue'
 import { writeProjectFile } from '../../api/agent.js'
+import TodoPanel from './TodoPanel.vue'
 
 // #4 代码块「应用到文件」：每次渲染收集代码块原文，供事件委托取回
 const codeBlocks = []
@@ -42,9 +43,11 @@ const props = defineProps({
   error: { type: String, default: '' },
   projectId: { type: String, default: '' },
   readonly: { type: Boolean, default: false },
+  session: { type: Object, default: null },
+  showTodos: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['rollback', 'regenerate', 'restore', 'retryTool', 'open-subagent'])
+const emit = defineEmits(['rollback', 'regenerate', 'restore', 'retryTool', 'open-subagent', 'update:show-todos'])
 
 // #9 图片点击放大预览
 const previewUrl = ref('')
@@ -471,6 +474,31 @@ defineExpose({ clearRetrying })
       </button>
     </transition>
 
+    <!-- 任务清单：浮层在消息区右下角，按钮在右侧距底部 5px -->
+    <transition name="todo-float">
+      <TodoPanel
+        v-if="showTodos"
+        class="chat__todo-float"
+        :session="session"
+        @close="emit('update:show-todos', false)"
+      />
+    </transition>
+    <button
+      v-if="session && Array.isArray(session.todos) && session.todos.length"
+      type="button"
+      class="chat__todo-toggle"
+      :class="{ 'is-active': showTodos }"
+      title="任务清单"
+      aria-label="任务清单"
+      @click="emit('update:show-todos', !showTodos)"
+    >
+      <ListTree :size="18" />
+      <span
+        v-if="session && Array.isArray(session.todos) && session.todos.length"
+        class="chat__todo-toggle-badge"
+      >{{ session.todos.length }}</span>
+    </button>
+
     <!-- #9 图片放大预览 -->
     <a-modal
       :open="!!previewUrl"
@@ -515,8 +543,9 @@ defineExpose({ clearRetrying })
 }
 .chat__to-bottom {
   position: absolute;
-  right: 20px;
-  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 5px;
   width: 40px;
   height: 40px;
   border-radius: 50%;
@@ -536,10 +565,10 @@ defineExpose({ clearRetrying })
   background: @color-primary;
   border-color: @color-primary;
   box-shadow: 0 6px 18px rgba(37, 99, 235, 0.35);
-  transform: translateY(-1px);
+  transform: translate(-50%, -1px);
 }
 .chat__to-bottom:active {
-  transform: scale(0.94);
+  transform: translate(-50%, 1px) scale(0.94);
 }
 .to-bottom-fade-enter-active,
 .to-bottom-fade-leave-active {
@@ -548,7 +577,88 @@ defineExpose({ clearRetrying })
 .to-bottom-fade-enter-from,
 .to-bottom-fade-leave-to {
   opacity: 0;
-  transform: translateY(8px);
+  transform: translate(-50%, 16px);
+}
+.to-bottom-fade-enter-to,
+.to-bottom-fade-leave-from {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+/* 任务清单触发按钮：消息区右侧、距底部 5px */
+.chat__todo-toggle {
+  position: absolute;
+  right: 20px;
+  bottom: 5px;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg, #fff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.15);
+  color: var(--color-text);
+  cursor: pointer;
+  z-index: 6;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.chat__todo-toggle:hover {
+  color: #fff;
+  background: var(--brand, #2563eb);
+  border-color: var(--brand, #2563eb);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.35);
+  transform: translateY(-1px);
+}
+.chat__todo-toggle.is-active {
+  color: #fff;
+  background: var(--brand, #2563eb);
+  border-color: var(--brand, #2563eb);
+}
+.chat__todo-toggle-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--brand, #2563eb);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+/* 任务清单浮层：消息区右下角，按钮上方展开 */
+.chat__todo-float {
+  position: absolute;
+  bottom: 52px;
+  right: 20px;
+  width: 300px;
+  max-height: 60vh;
+  z-index: 40;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 10px;
+  background: var(--color-bg, #fff);
+  box-shadow: -4px 8px 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.todo-float-enter-active,
+.todo-float-leave-active {
+  transition: transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.26s ease;
+}
+.todo-float-enter-from,
+.todo-float-leave-to {
+  transform: translateY(16px);
+  opacity: 0;
+}
+.todo-float-enter-to,
+.todo-float-leave-from {
+  transform: translateY(0);
+  opacity: 1;
 }
 .chat__empty {
   color: @color-text-muted;
