@@ -1,6 +1,7 @@
 <script setup>
-import { ref, nextTick, computed } from 'vue'
-import { GitCompare, ListTodo, MessageSquareText } from 'lucide-vue-next'
+import { ref, nextTick } from 'vue'
+import { GitCompare, ListTodo, MessageSquareText, Download, Eraser } from 'lucide-vue-next'
+import { Modal, message } from 'ant-design-vue'
 import { updateSession } from '../../sessions.js'
 
 const props = defineProps({
@@ -9,7 +10,7 @@ const props = defineProps({
   showChanges: { type: Boolean, default: false },
   showTodos: { type: Boolean, default: false },
 })
-const emit = defineEmits(['open-log', 'update:show-changes', 'update:show-todos'])
+const emit = defineEmits(['open-log', 'update:show-changes', 'update:show-todos', 'clear-chat'])
 
 const editingTitle = ref(false)
 const titleDraft = ref('')
@@ -42,6 +43,53 @@ async function commitRename() {
 }
 function cancelRename() {
   editingTitle.value = false
+}
+
+// #5 导出对话：纯前端生成 MD / JSON 并下载
+function plainContent(m) {
+  if (Array.isArray(m.content)) {
+    return m.content.map((p) => (p.type === 'text' ? p.text : p.type === 'image_url' ? '[图片]' : '')).join('')
+  }
+  return m.content || ''
+}
+function exportChat(format) {
+  const s = props.activeSession
+  if (!s) return
+  if (format === 'json') {
+    const blob = new Blob([JSON.stringify(s, null, 2)], { type: 'application/json' })
+    downloadBlob(blob, `${s.title || 'chat'}.json`)
+  } else {
+    const lines = [`# ${s.title || '对话导出'}`, '', `> 导出时间：${new Date().toLocaleString()}`, '']
+    for (const m of s.messages) {
+      const role = m.role === 'user' ? '用户' : '助手'
+      lines.push(`## ${role}`, '', plainContent(m), '')
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
+    downloadBlob(blob, `${s.title || 'chat'}.md`)
+  }
+  message.success('已导出')
+}
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// #5 清空对话
+function clearChat() {
+  const s = props.activeSession
+  if (!s) return
+  Modal.confirm({
+    title: '清空当前对话？',
+    content: '将删除该会话下的全部消息（文件变更不会被回退），此操作不可撤销。',
+    okText: '清空',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk: () => emit('clear-chat', s.id),
+  })
 }
 </script>
 
@@ -87,6 +135,25 @@ function cancelRename() {
       @click="emit('open-log')"
     >
       <template #icon><MessageSquareText :size="14" /></template>
+    </a-button>
+    <a-dropdown>
+      <a-button class="chat__head-btn" size="small" title="导出对话">
+        <template #icon><Download :size="14" /></template>
+      </a-button>
+      <template #overlay>
+        <a-menu>
+          <a-menu-item key="md" @click="exportChat('md')">导出为 Markdown</a-menu-item>
+          <a-menu-item key="json" @click="exportChat('json')">导出为 JSON</a-menu-item>
+        </a-menu>
+      </template>
+    </a-dropdown>
+    <a-button
+      class="chat__head-btn"
+      size="small"
+      title="清空对话"
+      @click="clearChat"
+    >
+      <template #icon><Eraser :size="14" /></template>
     </a-button>
   </div>
 </template>

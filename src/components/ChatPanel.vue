@@ -699,6 +699,19 @@ function parseFileOp(result, name) {
   return { filePath, backupId }
 }
 
+// #5 清空对话：删除当前会话下全部消息（不清退文件变更）
+async function onClearChat(sessionId) {
+  if (loading.value) return
+  const session = sessions.list.find((s) => s.id === sessionId)
+  if (!session) return
+  try {
+    await truncateSession(sessionId, 0)
+    message.success('对话已清空')
+  } catch (e) {
+    message.error('清空失败: ' + (e?.message || e))
+  }
+}
+
 // 回退到某条 user 消息之前：删除该 user 消息及其之后所有内容，
 // 并同步把这段对话中 Agent 改动/新建的文件一并回退到该消息之前的状态。
 async function rollbackTo(msg) {
@@ -875,6 +888,7 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
       @open-log="showLog = true"
       @update:show-changes="showChanges = $event"
       @update:show-todos="showTodos = $event"
+      @clear-chat="onClearChat"
     />
 
     <div class="chat__body" :style="{ gridTemplateColumns: gridCols }">

@@ -1,3 +1,17 @@
+// #4 代码块「应用到文件」：把代码直接写回项目文件
+export async function writeProjectFile(content, relPath, projectId, permission = 'full') {
+  const resp = await fetch('/api/file/write', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, relPath, projectId, permission }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    throw new Error(err.error || `写入失败: ${resp.status}`)
+  }
+  return resp.json()
+}
+
 // 上传图片（#9）：把 dataURL 交给后端落盘，返回可访问的短 URL
 export async function uploadImage(dataUrl, name = '', type = '') {
   const resp = await fetch('/api/upload', {

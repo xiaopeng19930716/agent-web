@@ -3,14 +3,36 @@ import { ref, reactive, computed, nextTick, watch, onMounted } from 'vue'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
-import { ChevronDown, ChevronUp, Check, Loader2, Copy, ArrowDown, Undo2, Redo2, Timer, User, ListTree } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Check, Loader2, Copy, ArrowDown, Undo2, Redo2, Timer, User, ListTree, FileDown } from 'lucide-vue-next'
+import { message } from 'ant-design-vue'
+import { writeProjectFile } from '../../api/agent.js'
 
+// #4 代码块「应用到文件」：每次渲染收集代码块原文，供事件委托取回
+const codeBlocks = []
 marked.setOptions({
   highlight(code, lang) {
     if (lang && hljs.getLanguage(lang)) {
       return hljs.highlight(code, { language: lang }).value
     }
     return hljs.highlightAuto(code).value
+  },
+})
+// 自定义 code 渲染：包一层带「应用到文件」按钮的容器（按钮用 data-ci 索引 codeBlocks）
+const defaultRenderer = new marked.Renderer()
+marked.use({
+  renderer: {
+    code(code, infostring) {
+      const lang = (infostring || '').trim().split(/\s+/)[0]
+      const idx = codeBlocks.push({ code, lang }) - 1
+      const highlighted = defaultRenderer.code
+        ? defaultRenderer.code.call(this, code, infostring)
+        : `<pre><code>${code}</code></pre>`
+      const applyBtn =
+        lang && props.projectId
+          ? `<button class="code-apply-btn" data-ci="${idx}" title="应用到文件">应用到文件</button>`
+          : ''
+      return `<div class="code-block" data-ci="${idx}">${highlighted}${applyBtn}</div>`
+    },
   },
 })
 
@@ -28,6 +50,42 @@ const emit = defineEmits(['rollback', 'regenerate', 'restore', 'retryTool', 'ope
 const previewUrl = ref('')
 function previewImage(url) {
   previewUrl.value = url
+}
+
+// #4 代码块「应用到文件」：点击委托 + 弹窗
+const applyModal = reactive({ open: false, code: '', lang: '', relPath: '', writing: false })
+function onMarkdownClick(e) {
+  const btn = e.target.closest?.('.code-apply-btn')
+  if (!btn) return
+  const ci = Number(btn.dataset.ci)
+  const block = codeBlocks[ci]
+  if (!block) return
+  const ext = block.lang ? guessExt(block.lang) : ''
+  applyModal.open = true
+  applyModal.code = block.code
+  applyModal.lang = block.lang
+  applyModal.relPath = ext ? `untitled.${ext}` : 'untitled.txt'
+  applyModal.writing = false
+}
+function guessExt(lang) {
+  const map = { js: 'js', javascript: 'js', ts: 'ts', typescript: 'ts', vue: 'vue', html: 'html', css: 'css', json: 'json', py: 'py', python: 'py', java: 'java', go: 'go', rs: 'rs', rust: 'rs', c: 'c', cpp: 'cpp', sh: 'sh', bash: 'sh', md: 'md', markdown: 'md', xml: 'xml', yaml: 'yaml', yml: 'yml', sql: 'sql' }
+  return map[lang.toLowerCase()] || lang.toLowerCase().slice(0, 6)
+}
+async function confirmApplyFile() {
+  if (!applyModal.relPath.trim()) {
+    message.warning('请填写目标文件路径')
+    return
+  }
+  applyModal.writing = true
+  try {
+    const r = await writeProjectFile(applyModal.code, applyModal.relPath.trim(), props.projectId)
+    message.success(`已写入: ${r.path}` + (r.backupId ? '（已备份原文件）' : ''))
+    applyModal.open = false
+  } catch (err) {
+    message.error(String(err?.message || err))
+  } finally {
+    applyModal.writing = false
+  }
 }
 
 // 对话级回退：删除该消息及其之后 / 重新生成
@@ -83,6 +141,7 @@ function toggleThinking(i) {
 }
 
 function renderMarkdown(text) {
+  codeBlocks.length = 0 // 每次渲染重置收集，避免索引错位
   return marked.parse(text || '')
 }
 
@@ -331,7 +390,7 @@ defineExpose({ clearRetrying })
                 </div>
               </div>
 
-              <div class="bubble__markdown" v-html="renderMarkdown(m.content)"></div>
+              <div class="bubble__markdown" @click="onMarkdownClick" v-html="renderMarkdown(m.content)"></div>
               <!-- 子任务入口：点击钻取到子 Agent 面板 -->
               <div v-if="m.subAgentRefs && m.subAgentRefs.length" class="subagent-refs">
                 <button
@@ -422,6 +481,20 @@ defineExpose({ clearRetrying })
       @cancel="previewUrl = ''"
     >
       <img :src="previewUrl" style="max-width: 80vw; max-height: 80vh; display: block" />
+    </a-modal>
+
+    <!-- #4 代码块应用到文件 -->
+    <a-modal
+      v-model:open="applyModal.open"
+      title="应用到文件"
+      @ok="confirmApplyFile"
+      :confirm-loading="applyModal.writing"
+      ok-text="写入"
+      cancel-text="取消"
+    >
+      <p class="text-xs text-gray-500 mb-1">将把下方代码写入项目内的文件（相对项目根目录）：</p>
+      <a-input v-model:value="applyModal.relPath" placeholder="如 src/components/Foo.vue" class="mb-3" />
+      <pre class="apply-code-preview">{{ applyModal.code.slice(0, 600) }}{{ applyModal.code.length > 600 ? '\n…' : '' }}</pre>
     </a-modal>
   </div>
 </template>
@@ -1116,5 +1189,43 @@ defineExpose({ clearRetrying })
 .img-preview-modal .ant-modal-content {
   background: transparent;
   box-shadow: none;
+}
+/* #4 代码块「应用到文件」按钮：浮在代码块右上角 */
+.bubble--ai.bubble .bubble__content :deep(.bubble__markdown .code-block) {
+  position: relative;
+}
+.bubble--ai.bubble .bubble__content :deep(.code-apply-btn) {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.bubble--ai.bubble .bubble__content :deep(.code-block:hover .code-apply-btn) {
+  opacity: 1;
+}
+.bubble--ai.bubble .bubble__content :deep(.code-apply-btn:hover) {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+.apply-code-preview {
+  max-height: 200px;
+  overflow: auto;
+  padding: 8px;
+  font-size: 12px;
+  border-radius: 8px;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  white-space: pre;
 }
 </style>

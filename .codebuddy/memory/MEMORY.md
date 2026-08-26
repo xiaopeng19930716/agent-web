@@ -17,7 +17,7 @@
 | #3 | 多轮编辑/重新生成 | ✅ | regenerate + 编辑历史消息后重试均已落地（用户 2026-08-25 确认） |
 | #4 | 消息内代码块操作（应用到文件/编辑器打开） | ⏸ 暂搁置 | 仅复制；缺「应用到文件」 |
 | #5 | 导出对话（MD/JSON）、清屏 | ⏸ 暂搁置 | 用户 2026-08-25 说暂搁置 |
-| #6 | 多 Agent/子任务编排（plan→execute） | ⬜ 未做 | 用户 2026-08-25 说稍后再做 |
+| #6 | 多 Agent/子任务编排（plan→execute） | ✅ | 2026-08-26 核实代码已完整实现（见下）；之前误标未做 |
 | #7 | 待办/任务清单 todo | ✅ | TodoPanel.vue + todoWrite 工具 + todo_update 事件 |
 | #8 | 增量文件编辑确认带 diff | ✅ | tool_confirm 事件 + confirm-diff 预览 + 允许/拒绝 |
 | #9 | 图像/截图理解 | ✅ | 2026-08-25 实现（见下） |
@@ -29,7 +29,7 @@
 | #16 | 首 token 延迟显示 | ✅ | |
 | #13b | 代理/网络配置（baseURL、系统代理） | 🗑 已移除 | 用户确认前端 Electron 打包前后端一体，无需自定义地址/代理，从清单删去 |
 
-### 剩余未做：#6 ｜ 暂搁置：#4 #5
+### 剩余未做：无 ｜ 暂搁置：#4 #5
 
 ## #12 用量统计页面（2026-08-25 实现细节）
 - 路由：`src/router/index.js` 顶层 `/usage`（独立页，不嵌设置）。
@@ -70,6 +70,14 @@
 - 前端改动：`api/agent.js` 新增 `uploadImage`；`ComposerInput.vue`（按钮/粘贴/预览/发送前上传）；`ChatPanel.vue`（send 接收 images、构造多模态 content、estimateTokens 兼容数组）；`MessageList.vue`（气泡渲染文本+缩略图、点击 a-modal 放大）。
 - `server/.uploads` 已加 `.gitignore`。
 - 注意：需模型本身支持 vision（如 qwen-vl / gpt-4o）；token 估算图片按 1000/张。
+
+## #6 多 Agent 规划模式（plan→execute，2026-08-26 核实已实现）
+- 开关：`settings.planMode`（ComposerInput 左侧「计划」按钮）。高级设置：`planTemperature`/`execTemperature`/`subAgentMaxTurns`/`allowReplan`/`subModelKey`/`commandTimeout`。
+- 后端 `server/lib/chat.js`：`runPlanAndExecute` 主流程 → `runPlanPhase`（计划阶段：主 Agent 先澄清需求、仅开只读工具 + `planTasks` 工具，调 `planTasks` 收口提交子任务清单）→ `resolvePlanConfirm` 等用户勾选跳过项后执行 → 子 Agent 循环逐条执行（`buildSubAgentSystemPrompt`，专注单任务、可用工具实际写/执行）。
+- `planTasks` 工具：结构化提交子任务清单（title/description），normalizePlan 生成 plan-id。
+- `/api/chat` 的 `planMode` 分支走 `runPlanAndExecute`；`/chat/plan-confirm` 唤醒挂起进入执行。
+- allowReplan：子 Agent 执行中发现必要新增工作可再调 planTasks 追加。
+- 规划模型供应商：ModelSettings.vue 内已含「百炼 Coding Plan / Token Plan」「智谱 GLM · Coding Plan」等 baseUrl。
 
 ## #11 SSE 断流重连 + 本地缓冲（2026-08-25 实现细节）
 - 位置：`src/api/agent.js` 的 `streamChat` 加重连包裹。
