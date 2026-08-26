@@ -235,9 +235,39 @@ function onCmdInput() {
   }
 }
 
-// 键盘处理：Enter 发送（Shift+Enter 换行），Cmd/Ctrl+Enter 同样发送，再处理 @ / 面板
+// 键盘处理：面板打开时，方向键/Enter/Esc 优先交给面板选择，不触发发送
 function onCmdKeydown(e) {
-  // Enter（含 Cmd/Ctrl+Enter）发送；Shift+Enter 换行
+  // @ 文件面板：完全委托给子面板（含 Enter 选择文件）
+  // 注意：不要在父级无条件 preventDefault，否则会挡住 @ 后的字符输入（过滤关键字）；
+  // atPanel 仅对方向键/Enter/Esc 自行 preventDefault，其余按键放行以维持输入。
+  if (showAtPanel.value) {
+    if (atPanelRef.value) atPanelRef.value.onKeydown(e);
+    return;
+  }
+  // / 命令面板：方向键移动高亮，Enter 选择，Esc 关闭
+  if (showCmdPanel.value) {
+    const list = allCmdItems.value;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      cmdHighlight.value = Math.min(cmdHighlight.value + 1, Math.max(list.length - 1, 0));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      cmdHighlight.value = Math.max(cmdHighlight.value - 1, 0);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (list.length) {
+        const item = list[cmdHighlight.value];
+        if (item) chooseCmd(item);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      showCmdPanel.value = false;
+    } else {
+      e.preventDefault();
+    }
+    return;
+  }
+  // 无面板：Enter 发送，Shift+Enter 换行
   if (e.key === "Enter") {
     if (e.shiftKey) {
       e.preventDefault();
@@ -247,26 +277,6 @@ function onCmdKeydown(e) {
     e.preventDefault();
     triggerSend();
     return;
-  }
-  if (showAtPanel.value) {
-    atPanelRef.value && atPanelRef.value.onKeydown(e);
-    return;
-  }
-  if (!showCmdPanel.value) return;
-  const list = allCmdItems.value;
-  if (e.key === "ArrowDown") {
-    e.preventDefault();
-    cmdHighlight.value = Math.min(cmdHighlight.value + 1, Math.max(list.length - 1, 0));
-  } else if (e.key === "ArrowUp") {
-    e.preventDefault();
-    cmdHighlight.value = Math.max(cmdHighlight.value - 1, 0);
-  } else if (e.key === "Enter" && list.length) {
-    e.preventDefault();
-    suppressSend = true;
-    const item = allCmdItems.value.find((_, i) => i === cmdHighlight.value);
-    if (item) chooseCmd(item);
-  } else if (e.key === "Escape") {
-    showCmdPanel.value = false;
   }
 }
 

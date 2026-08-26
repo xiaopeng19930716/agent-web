@@ -175,7 +175,7 @@ function clearChat() {
 .chat__titlebar-text {
   font-size: 15px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--color-text);
   padding: 5px 10px;
   border-radius: 6px;
   cursor: text;
@@ -188,23 +188,23 @@ function clearChat() {
   transition: background 0.12s, border-color 0.12s;
 }
 .chat__titlebar-text:hover {
-  background: #f1f5f9;
-  border-color: #e2e8f0;
+  background: var(--color-bg-subtle);
+  border-color: var(--color-border);
 }
 .chat__titlebar-input {
   font-size: 15px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--color-text);
   padding: 5px 10px;
-  border: 1px solid #2563eb;
+  border: 1px solid var(--brand);
   border-radius: 6px;
   outline: none;
-  background: #fff;
+  background: var(--color-bg-input, #fff);
   width: 100%;
   max-width: 480px;
   font-family: inherit;
 }
 .chat__titlebar-input:focus {
-  box-shadow: 0 0 0 2px #bfdbfe;
+  box-shadow: 0 0 0 2px var(--color-border-focus, #bfdbfe);
 }
 </style>
