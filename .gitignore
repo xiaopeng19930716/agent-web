@@ -27,6 +27,7 @@ server/.uploads
 # Electron 打包产物（release / release_build 目录由 electron-builder 生成）
 release
 release_build
+release-*
 
 # Editor directories and files
 .vscode/*
@@ -38,6 +39,7 @@ release_build
 *.njsproj
 *.sln
 *.sw?
+*.ps1
 
 # LangGraph API
 .langgraph_api

@@ -1,22 +1,22 @@
 appId: com.codeagent.app
 productName: Code Agent
-copyright: Copyright © 2026
+copyright: Copyright 漏 2026
 
 directories:
   output: release
   buildResources: build
 
-# 打包包含的内容：渲染产物、后端、主进程/预加载构建产物、依�?
-# 注意：不要写 node_modules/**/*，否则会�?vite/electron �?devDependencies 全打�?asar�?
-# 导致安装包巨大、安装解压极慢。electron-builder 默认只打�?dependencies 中的生产依赖�?
+# 鎵撳寘鍖呭惈鐨勫唴瀹癸細娓叉煋浜х墿銆佸悗绔€佷富杩涚▼/棰勫姞杞芥瀯寤轰骇鐗┿€佷緷璧?
+# 娉ㄦ剰锛氫笉瑕佸啓 node_modules/**/*锛屽惁鍒欎細鎶?vite/electron 绛?devDependencies 鍏ㄦ墦杩?asar锛?
+# 瀵艰嚧瀹夎鍖呭法澶с€佸畨瑁呰В鍘嬫瀬鎱€€俥lectron-builder 榛樿鍙墦鍖?dependencies 涓殑鐢熶骇渚濊禆銆?
 files:
   - dist/**/*
   - out/**/*
   - server/**/*
   - package.json
 
-# asar 打包，但把后端与依赖解包�?app.asar.unpacked�?
-# 以便主进�?fork 出的子进程能正常加载 ESM server（asar 内不支持 ESM 动态加载）
+# asar 鎵撳寘锛屼絾鎶婂悗绔笌渚濊禆瑙ｅ寘鍒?app.asar.unpacked锛?
+# 浠ヤ究涓昏繘绋?fork 鍑虹殑瀛愯繘绋嬭兘姝ｅ父鍔犺浇 ESM server锛坅sar 鍐呬笉鏀寔 ESM 鍔ㄦ€佸姞杞斤級
 asar: true
 asarUnpack:
   - server/**/*
@@ -25,9 +25,9 @@ asarUnpack:
 win:
   target:
     - nsis
-  # 跳过代码签名（未配置证书）：直接产出未签名安装包�?
-  # 用户安装�?SmartScreen 会提示未知发布者，�?仍要运行"即可�?
-  # 同时避免 electron-builder �?GitHub 拉取 winCodeSign 二进制�?
+  # 璺宠繃浠ｇ爜绛惧悕锛堟湭閰嶇疆璇佷功锛夛細鐩存帴浜у嚭鏈鍚嶅畨瑁呭寘锛?
+  # 鐢ㄦ埛瀹夎鏃?SmartScreen 浼氭彁绀烘湭鐭ュ彂甯冭€咃紝鐐?浠嶈杩愯"鍗冲彲銆?
+  # 鍚屾椂閬垮厤 electron-builder 鍘?GitHub 鎷夊彇 winCodeSign 浜岃繘鍒躲€?
   sign: null
   artifactName: ${productName}-${version}-setup.${ext}
 
@@ -36,24 +36,23 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
-  # 自定义脚本：默认展开"安装细节"窗格，显示实时解�?复制进度
+  # 鑷畾涔夎剼鏈細榛樿灞曞紑"瀹夎缁嗚妭"绐楁牸锛屾樉绀哄疄鏃惰В鍘?澶嶅埗杩涘害
   include: build/installer.nsh
-  # �?zip 而非 LZMA 压缩，解压速度更快，安装更顺滑
-  useZip: true
+  # 使用默认 LZMA 压缩（useZip 在 electron-builder 25 上存在解压损坏/超时问题，弃用）
   displayLanguageSelector: false
-  # 卸载时一并清理用户数据目录（按需，谨慎：会删除会话等数据�?
+  # 鍗歌浇鏃朵竴骞舵竻鐞嗙敤鎴锋暟鎹洰褰曪紙鎸夐渶锛岃皑鎱庯細浼氬垹闄や細璇濈瓑鏁版嵁锛?
   # deleteAppDataOnUninstall: true
 
 mac:
-  # 未配�?Apple Developer 证书与公证：生成�?dmg 仅供本机/信任设备自测�?
-  # 普通用户会�?Gatekeeper 拦截。配�?identity + 开�?notarize 后可正常分发�?
+  # 鏈厤缃?Apple Developer 璇佷功涓庡叕璇侊細鐢熸垚鐨?dmg 浠呬緵鏈満/淇′换璁惧鑷祴锛?
+  # 鏅€氱敤鎴蜂細琚?Gatekeeper 鎷︽埅銆傞厤缃?identity + 寮€鍚?notarize 鍚庡彲姝ｅ父鍒嗗彂銆?
   target:
     - target: dmg
       arch:
         - x64
         - arm64
   category: public.app-category.developer-tools
-  # identity: null  # 自签�?无签�?
+  # identity: null  # 鑷鍚?鏃犵鍚?
   hardenedRuntime: true
   gatekeeperAssess: false
   artifactName: ${productName}-${version}-${arch}.${ext}
@@ -61,4 +60,4 @@ mac:
 dmg:
   title: ${productName} ${version}
 
-# 自动更新暂不启用（electron-updater 可后续接入）
+# 鑷姩鏇存柊鏆備笉鍚敤锛坋lectron-updater 鍙悗缁帴鍏ワ級
