@@ -2,18 +2,10 @@ import { reactive } from 'vue'
 
 const defaults = {
   // 按供应商分组：{ [vendorKey]: { name, npm, options:{apiKey,baseURL}, models:{ [modelId]: {...} } } }
-  vendors: {
-    'bailian-coding': {
-      name: '阿里云百炼',
-      npm: '@ai-sdk/openai',
-      options: { apiKey: '', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
-      models: {
-        'qwen-coder-plus': { name: 'Qwen Coder Plus', options: { temperature: 0.3 } },
-      },
-    },
-  },
-  // 当前选中模型：组合键 `${vendorKey}/${modelId}`
-  activeModel: 'bailian-coding/qwen-coder-plus',
+  // 不预置任何供应商；模型由用户在设置页自行配置（如「我的私有服务」）
+  vendors: {},
+  // 当前选中模型：组合键 `${vendorKey}/${modelId}`，默认空，待用户配置后选择
+  activeModel: '',
   // 已配置（保存过）的供应商 key 集合
   configuredVendors: [],
   // 已禁用的供应商 key 集合（禁用的供应商，其下的模型在对话下拉中不显示）

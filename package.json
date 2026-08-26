@@ -3,9 +3,12 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "description": "Code Agent - AI coding assistant desktop app",
+  "author": "Code Agent",
   "main": "out/main.cjs",
   "scripts": {
     "dev:all": "concurrently -n web,api -c cyan,green \"npm run dev\" \"npm run server:watch\"",
+    "web": "concurrently -n web,api -c cyan,green \"vite --open\" \"npm run server:watch\"",
     "dev": "vite --open",
     "server": "node server/index.js",
     "server:watch": "nodemon --watch server --ext js,json --ignore server/data --ignore server/node_modules server/index.js",

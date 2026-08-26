@@ -24,9 +24,10 @@ asarUnpack:
 win:
   target:
     - nsis
-  # 未配置代码签名证书：SmartScreen 会提示未知发布者，用户点"仍要运行"即可安装
-  # 如需去除警告，配置 certificateFile / certificatePassword 后取消注释：
-  # sign: ''
+  # 跳过代码签名（未配置证书）：直接产出未签名安装包，
+  # 用户安装时 SmartScreen 会提示未知发布者，点"仍要运行"即可。
+  # 同时避免 electron-builder 去 GitHub 拉取 winCodeSign 二进制。
+  sign: null
   artifactName: ${productName}-${version}-setup.${ext}
 
 nsis:
@@ -39,12 +40,11 @@ mac:
   # 未配置 Apple Developer 证书与公证：生成的 dmg 仅供本机/信任设备自测，
   # 普通用户会被 Gatekeeper 拦截。配置 identity + 开启 notarize 后可正常分发。
   target:
-    - dmg
+    - target: dmg
+      arch:
+        - x64
+        - arm64
   category: public.app-category.developer-tools
-  # 同时构建 Intel 与 Apple Silicon
-  arch:
-    - x64
-    - arm64
   # identity: null  # 自签名/无签名
   hardenedRuntime: true
   gatekeeperAssess: false

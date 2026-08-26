@@ -53,7 +53,12 @@ const allVendors = computed(() => [
   ...settings.customVendors.map((v) => ({ ...v, isCustomVendor: true })),
 ])
 
-const activeKey = ref(PRESET_VENDORS[0].key)
+// 回退目标：优先用户自定义供应商，无则进入"新增"态；不回退到预置供应商
+function fallbackVendorKey() {
+  return settings.customVendors.length ? settings.customVendors[0].key : '__new__'
+}
+
+const activeKey = ref(fallbackVendorKey())
 const activeVendor = computed(() => allVendors.value.find((v) => v.key === activeKey.value) || allVendors.value[0])
 const isNew = computed(() => activeKey.value === '__new__')
 // 是否为预置供应商：key 与名称均只读，不可修改（防止被改名导致数据丢失 / 孤儿残留）
@@ -286,20 +291,13 @@ async function save() {
   vCfg.name = isPreset ? (activeVendor.value?.name || newKey) : form.name.trim()
   vCfg.npm = platformToNpm(form.platform)
   vCfg.options = { apiKey: form.apiKey.trim(), baseURL: form.baseUrl.trim() }
-  // 用表单中现有的 model id 集合决定要删哪些、保留哪些
-  const newIds = new Set(rows.map((r) => r.id.trim()))
-  const preserved = {}
-  for (const [mid, m] of Object.entries(vCfg.models || {})) {
-    if (!newIds.has(mid)) preserved[mid] = m
-  }
+  // 表单 modelRows 即为该供应商模型的唯一真相来源：直接重建，不回溯旧数据
   const nextModels = {}
   for (const r of rows) {
     const id = r.id.trim()
-    const prev = preserved[id]
     const opt = {}
     const t = toPositiveNumber(r.temperature)
     if (t !== undefined) opt.temperature = t
-    else if (prev && prev.options && typeof prev.options.temperature === 'number') opt.temperature = prev.options.temperature
     else opt.temperature = 0.3
     nextModels[id] = {
       name: r.name.trim() || id,
@@ -310,8 +308,6 @@ async function save() {
       options: opt,
     }
   }
-  // 把未删除的历史模型附回
-  for (const [mid, m] of Object.entries(preserved)) nextModels[mid] = m
   vCfg.models = nextModels
   // 仅当填入有效 API Key 时才标记为"已配置"；只改 baseURL 或只列模型不足以认定为已配置
   if (form.apiKey.trim()) markConfiguredVendor(newKey)
@@ -338,8 +334,8 @@ function deleteCustomVendor(key) {
     settings.activeModel = firstVk && firstMid ? `${firstVk}/${firstMid}` : ''
   }
   if (activeKey.value === key) {
-    activeKey.value = PRESET_VENDORS[0].key
-    selectVendor(PRESET_VENDORS[0].key)
+    activeKey.value = fallbackVendorKey()
+    selectVendor(activeKey.value)
   }
   saveModels()
 }
@@ -353,8 +349,8 @@ function resetDefaults() {
     cancelText: '取消',
     onOk() {
       resetSettings()
-      activeKey.value = PRESET_VENDORS[0].key
-      selectVendor(PRESET_VENDORS[0].key)
+      activeKey.value = fallbackVendorKey()
+      selectVendor(activeKey.value)
       message.success('已恢复默认设置')
     },
   })
@@ -403,7 +399,7 @@ async function fetchModels() {
   }
 }
 
-onMounted(() => selectVendor(PRESET_VENDORS[0].key))
+onMounted(() => selectVendor(fallbackVendorKey()))
 </script>
 
 <template>

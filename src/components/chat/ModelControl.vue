@@ -28,10 +28,15 @@ const groupedModels = computed(() => {
   const disabled = new Set(
     Array.isArray(settings.disabledVendors) ? settings.disabledVendors : []
   );
+  const configured = new Set(
+    Array.isArray(settings.configuredVendors) ? settings.configuredVendors : []
+  );
   const groups = new Map();
   for (const m of list) {
     const key = m.vendorKey || "__custom__";
     if (key !== "__custom__" && disabled.has(key)) continue;
+    // 未配置（无 API Key）的预置/标准供应商不显示其模型；自定义供应商无"配置"概念，始终显示
+    if (key !== "__custom__" && !configured.has(key)) continue;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(m);
   }
