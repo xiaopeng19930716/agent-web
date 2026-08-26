@@ -3,8 +3,9 @@ import cors from 'cors'
 import { config } from 'dotenv'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
-import { existsSync } from 'fs'
+import { existsSync, writeFileSync } from 'fs'
 import { initStores } from './lib/store.js'
+import { migrateLegacyConfig } from './lib/config.js'
 import { PORT } from './lib/config.js'
 import projectsRouter from './routes/projects.js'
 import sessionsRouter from './routes/sessions.js'
@@ -27,6 +28,9 @@ app.use(express.json({ limit: '10mb' }))
 
 // 加载持久化存储（projects / sessions）
 initStores()
+
+// 迁移旧版根目录配置文件到 config/ 子目录（历史数据兼容）
+migrateLegacyConfig()
 
 // 各 API 路由模块（保持 /api/* 路径与响应格式完全兼容）
 app.use('/api', projectsRouter)
@@ -59,6 +63,12 @@ function listenWithFallback(port, tries = 0) {
   }
   const server = app.listen(port, () => {
     console.log(`Code Agent 后端已启动: http://localhost:${port}`)
+    // 写入 .api-port，使 Vite/Electron 开发代理能动态定位实际启动端口
+    try {
+      writeFileSync(join(__dirname, '..', '.api-port'), String(port), 'utf-8')
+    } catch (e) {
+      console.warn('写入 .api-port 失败:', e.message)
+    }
   })
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {

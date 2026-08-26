@@ -1,6 +1,6 @@
 import fs from 'fs'
 import os from 'os'
-import { dirname, join } from 'path'
+import { dirname, join, basename } from 'path'
 import { fileURLToPath } from 'url'
 import { config } from 'dotenv'
 
@@ -28,7 +28,14 @@ export const MODELS_FILE = join(CONFIG_DIR, 'models.json')
 export const MCP_FILE = join(CONFIG_DIR, 'mcp.json')
 export const SETTINGS_FILE = join(CONFIG_DIR, 'settings.json')
 
-// 读取某个配置文件，缺失或损坏返回 null（调用方据此回退默认值）
+// 兼容旧版：配置曾直接写在 ~/.code-agent 根目录下（无 config/ 子目录）。
+// 旧版路径 = 根目录 + 文件名（如 ~/.code-agent/models.json）
+function legacyConfigPath(file) {
+  return join(CODE_AGENT_ROOT, basename(file))
+}
+
+// 读取某个配置文件，缺失或损坏返回 null（调用方据此回退默认值）。
+// 优先读新版 config/ 子目录；若新版缺失但根目录存在旧版文件，回退读取旧版，保证历史数据可用。
 export function readConfigFile(file) {
   try {
     if (fs.existsSync(file)) {
@@ -37,10 +44,20 @@ export function readConfigFile(file) {
   } catch {
     // 损坏则忽略，回退默认
   }
+  const legacy = legacyConfigPath(file)
+  if (legacy !== file) {
+    try {
+      if (fs.existsSync(legacy)) {
+        return JSON.parse(fs.readFileSync(legacy, 'utf-8'))
+      }
+    } catch {
+      // 损坏则忽略
+    }
+  }
   return null
 }
 
-// 写入某个配置文件（仅接受对象）
+// 写入某个配置文件（仅接受对象），固定写入 config/ 子目录（新版位置）
 export function writeConfigFile(file, body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return false
@@ -48,4 +65,22 @@ export function writeConfigFile(file, body) {
   fs.mkdirSync(CONFIG_DIR, { recursive: true })
   fs.writeFileSync(file, JSON.stringify(body, null, 2))
   return true
+}
+
+// 一次性迁移：将根目录下的旧版配置文件移入 config/ 子目录，保持数据唯一来源。
+// 仅当新版 config/ 中对应文件不存在时才移动，避免覆盖已有新版配置。
+export function migrateLegacyConfig() {
+  for (const file of [MODELS_FILE, MCP_FILE, SETTINGS_FILE]) {
+    const legacy = legacyConfigPath(file)
+    if (legacy === file) continue
+    if (fs.existsSync(legacy) && !fs.existsSync(file)) {
+      try {
+        fs.mkdirSync(CONFIG_DIR, { recursive: true })
+        fs.renameSync(legacy, file)
+        console.log(`[迁移] 已将旧版配置 ${basename(legacy)} 移入 config/`)
+      } catch (e) {
+        console.warn(`[迁移] 移动 ${basename(legacy)} 失败:`, e.message)
+      }
+    }
+  }
 }
