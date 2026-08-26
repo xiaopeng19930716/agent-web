@@ -16,7 +16,7 @@ const emit = defineEmits(['regenerate', 'retryTool', 'open-subagent'])
 const m = computed(() => props.message)
 
 // 状态按消息 id 记录（组件实例即单条消息，自包含）
-const thinkingExpanded = ref(true)
+const thinkingExpanded = ref(false)
 const resultExpanded = ref(new Set())
 const retrying = ref(new Set())
 const copiedSet = ref(new Set())

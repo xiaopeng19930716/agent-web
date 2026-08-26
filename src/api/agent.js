@@ -27,6 +27,58 @@ export async function uploadImage(dataUrl, name = '', type = '') {
   return json.url
 }
 
+// 手动终端：调用本机 PowerShell/sh 执行一次性命令
+export async function runCommand({ command, cwd, projectId, permission, timeout }) {
+  const resp = await fetch('/api/run-command', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command, cwd, projectId, permission, timeout }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    throw new Error(err.error || `执行失败: ${resp.status}`)
+  }
+  return resp.json()
+}
+
+// 用本机编辑器打开文件（code / notepad / explorer / 默认关联）
+export async function openInEditor({ filePath, editor, projectId, permission }) {
+  const resp = await fetch('/api/open-in-editor', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filePath, editor, projectId, permission }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    throw new Error(err.error || `打开失败: ${resp.status}`)
+  }
+  return resp.json()
+}
+
+// 扫描本机常见编辑器，返回实际可用列表（动态下拉，非写死）
+export async function fetchEditors() {
+  const resp = await fetch('/api/editors', { method: 'GET' })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    throw new Error(err.error || `扫描编辑器失败: ${resp.status}`)
+  }
+  return resp.json()
+}
+
+// 列目录给本机编辑器文件树使用
+export async function listDir({ rel, projectId }) {
+  const resp = await fetch('/api/list-dir', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rel, projectId }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    throw new Error(err.error || `列目录失败: ${resp.status}`)
+  }
+  return resp.json()
+}
+
 // 调用本地后端，后端再流式转发百炼云
 // 支持 SSE 断流自动重连（#11）：网络中断时按指数退避重试，最多 maxRetries 次；
 // 重连前通过 onReset 清空本地已累积的半成品，避免重复内容；onReconnecting 用于 UI 提示。

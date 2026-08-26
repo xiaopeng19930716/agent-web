@@ -9,8 +9,10 @@ import {
 } from '@langchain/core/messages'
 import { BaseCallbackHandler } from '@langchain/core/callbacks/base'
 import { DASHSCOPE_BASE, API_KEY, DEFAULT_MODEL, MODELS_FILE, readConfigFile } from './config.js'
-import { buildTools, previewFileChange } from './fileTools.js'
+import { buildTools, previewFileChange, isDangerousCommand } from './fileTools.js'
 import { sessions } from './store.js'
+
+// 破坏性命令识别已迁移到 fileTools.js，与手动终端复用同一套规则。
 
 // 从服务端持久化的 models.json 解析指定模型的密钥与 baseURL，
 // 避免前端在 /chat 请求中明文传递 apiKey。密钥完全来自用户配置，不读取环境变量。
@@ -399,27 +401,6 @@ function applyTodoUpdate(sessionId, args) {
     return null
   }
   return session.todos
-}
-
-// 破坏性命令识别：与 executeCommand 安全边界一致（不可绕过）
-function isDangerousCommand(command) {
-  if (!command || typeof command !== 'string') return false
-  const c = command.trim()
-  const patterns = [
-    /\brm\s+-rf\b/,
-    /\brm\s+-fr\b/,
-    /\brmdir\s+\/s\b/i,
-    /\bformat\s+/i,
-    /\bshutdown\b/i,
-    /\bmkfs\b/,
-    /\bgit\s+push\b[^\n]*--force/,
-    /\bgit\s+push\b[^\n]*-f\b/,
-    /\bgit\s+reset\b[^\n]*--hard/,
-    /\bdel\s+\/[sq]/i,
-    />\s*\/dev\/sd/,
-    /\bdd\b[^\n]*\bof=\/dev/,
-  ]
-  return patterns.some((p) => p.test(c))
 }
 
 // 解析工具参数 JSON，解析失败则回退为空对象（保证后续流程不崩）

@@ -33,7 +33,29 @@ function readEnabledMcpServers() {
 }
 
 // 命令输出截断上限，避免超大输出（如 build 日志）撑爆模型上下文
-const MAX_CMD_OUTPUT = 8000
+export const MAX_CMD_OUTPUT = 8000
+
+// 破坏性命令识别：手动终端与 Agent 共用同一安全边界
+// 也供 chat.js / tools.js 复用，避免逻辑分叉
+export function isDangerousCommand(command) {
+  if (!command || typeof command !== 'string') return false
+  const c = command.trim()
+  const patterns = [
+    /\brm\s+-rf\b/,
+    /\brm\s+-fr\b/,
+    /\brmdir\s+\/s\b/i,
+    /\bformat\s+/i,
+    /\bshutdown\b/i,
+    /\bmkfs\b/,
+    /\bgit\s+push\b[^\n]*--force/,
+    /\bgit\s+push\b[^\n]*-f\b/,
+    /\bgit\s+reset\b[^\n]*--hard/,
+    /\bdel\s+\/[sq]/i,
+    />\s*\/dev\/sd/,
+    /\bdd\b[^\n]*\bof=\/dev/,
+  ]
+  return patterns.some((p) => p.test(c))
+}
 
 // 跨平台杀掉进程树（含子进程）：Windows 用 taskkill 杀整棵子树，POSIX 用进程组 SIGTERM
 function killProcessTree(child) {

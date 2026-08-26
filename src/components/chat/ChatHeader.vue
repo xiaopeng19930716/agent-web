@@ -1,6 +1,6 @@
 <script setup>
 import { ref, nextTick } from 'vue'
-import { GitCompare, MessageSquareText, Download, Eraser } from 'lucide-vue-next'
+import { GitCompare, MessageSquareText, Download, Eraser, Terminal, FileEdit } from 'lucide-vue-next'
 import { Modal, message } from 'ant-design-vue'
 import { updateSession } from '../../sessions.js'
 
@@ -9,7 +9,7 @@ const props = defineProps({
   projectId: { type: String, default: '' },
   showChanges: { type: Boolean, default: false },
 })
-const emit = defineEmits(['open-log', 'update:show-changes', 'clear-chat'])
+const emit = defineEmits(['open-log', 'update:show-changes', 'clear-chat', 'open-terminal', 'open-editor'])
 
 const editingTitle = ref(false)
 const titleDraft = ref('')
@@ -137,6 +137,22 @@ function clearChat() {
         </a-menu>
       </template>
     </a-dropdown>
+    <a-button
+      class="chat__head-btn"
+      size="small"
+      title="本机终端"
+      @click="emit('open-terminal')"
+    >
+      <template #icon><Terminal :size="14" /></template>
+    </a-button>
+    <a-button
+      class="chat__head-btn"
+      size="small"
+      title="本机编辑器"
+      @click="emit('open-editor')"
+    >
+      <template #icon><FileEdit :size="14" /></template>
+    </a-button>
     <a-button
       class="chat__head-btn"
       size="small"

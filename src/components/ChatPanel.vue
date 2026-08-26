@@ -31,6 +31,8 @@ import ChatHeader from './chat/ChatHeader.vue'
 import MessageList from './chat/MessageList.vue'
 import SubAgentPanel from './chat/SubAgentPanel.vue'
 import SessionChanges from './chat/SessionChanges.vue'
+import TerminalDrawer from './chat/TerminalDrawer.vue'
+import EditorDrawer from './chat/EditorDrawer.vue'
 
 import ComposerInput from './chat/ComposerInput.vue'
 import AddProjectModal from './chat/AddProjectModal.vue'
@@ -224,6 +226,8 @@ const showChanges = ref(false)
 // 是否展示悬浮「任务清单」层（对话中有 todo 数据时自动显示，用户可手动关闭）
 const showTodos = ref(false)
 const showAdd = ref(false)
+const showTerminal = ref(false)
+const showEditor = ref(false)
 const router = useRouter()
 
 // 右侧面板列宽：仅文件变更面板（任务清单已改为悬浮层）
@@ -879,6 +883,8 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
       @open-log="showLog = true"
       @update:show-changes="showChanges = $event"
       @clear-chat="onClearChat"
+      @open-terminal="showTerminal = true"
+      @open-editor="showEditor = true"
     />
 
     <div class="chat__body" :style="{ gridTemplateColumns: gridCols }">
@@ -966,6 +972,18 @@ onMounted(() => onBus('open-add-project', () => openAdd()))
       :open="showLog"
       :session="activeSession"
       @update:open="showLog = $event"
+    />
+
+    <TerminalDrawer
+      :open="showTerminal"
+      :project-id="activeProjectId.id || ''"
+      @update:open="showTerminal = $event"
+    />
+
+    <EditorDrawer
+      :open="showEditor"
+      :project-id="activeProjectId.id || ''"
+      @update:open="showEditor = $event"
     />
 
     <!-- 「需确认(ask)」模式：高风险工具执行前弹窗，等待用户允许/拒绝 -->
