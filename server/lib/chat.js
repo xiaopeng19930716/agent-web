@@ -10,7 +10,7 @@ import {
 import { BaseCallbackHandler } from '@langchain/core/callbacks/base'
 import { DASHSCOPE_BASE, API_KEY, DEFAULT_MODEL, MODELS_FILE, readConfigFile } from './config.js'
 import { buildTools, previewFileChange, isDangerousCommand } from './fileTools.js'
-import { sessions } from './store.js'
+import { getSession, saveSession } from './store.js'
 
 // 破坏性命令识别已迁移到 fileTools.js，与手动终端复用同一套规则。
 
@@ -369,7 +369,7 @@ async function executeToolCall(call, toolMap, res, { toolRoot, permission = 'ful
 
 // 把 todoWrite 的 action/items 应用到会话的 todos 列表，返回更新后的数组（或 null 表示无效）
 function applyTodoUpdate(sessionId, args) {
-  const session = sessions.get(sessionId)
+  const session = getSession(sessionId)
   if (!session) return null
   const action = args && args.action
   if (action === 'clear') {
@@ -400,6 +400,8 @@ function applyTodoUpdate(sessionId, args) {
   } else {
     return null
   }
+  // 写回完整会话文件（todos 随会话消息一起持久化）
+  saveSession(session)
   return session.todos
 }
 
