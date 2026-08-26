@@ -77,7 +77,7 @@ async function startBackend() {
 
   const modulePath = isDev
     ? join(appRoot, 'server', 'index.js')
-    : join(process.resourcesPath, 'app.asar.unpacked', 'server', 'index.js')
+    : join(process.resourcesPath, 'app.asar.unpacked', 'out', 'server.mjs')
 
   // 打包模式下若 dist 在 app.asar 里，设置 SERVE_DIST 让 Express 托管静态产物
   if (!isDev) {

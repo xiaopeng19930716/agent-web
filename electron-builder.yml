@@ -9,18 +9,21 @@ directories:
 # 鎵撳寘鍖呭惈鐨勫唴瀹癸細娓叉煋浜х墿銆佸悗绔€佷富杩涚▼/棰勫姞杞芥瀯寤轰骇鐗┿€佷緷璧?
 # 娉ㄦ剰锛氫笉瑕佸啓 node_modules/**/*锛屽惁鍒欎細鎶?vite/electron 绛?devDependencies 鍏ㄦ墦杩?asar锛?
 # 瀵艰嚧瀹夎鍖呭法澶с€佸畨瑁呰В鍘嬫瀬鎱€€俥lectron-builder 榛樿鍙墦鍖?dependencies 涓殑鐢熶骇渚濊禆銆?
+# 只打包前端产物、主进程/预加载构建产物、以及已 bundle 好的后端单文件（out/server.mjs）。
+# 注意：不再打包 server/**/* 与 node_modules/**/* —— 后端已用 esbuild 打成一个自包含文件，
+# 运行时不再需要解包任何 node_modules，避免海量小文件拖慢启动。
 files:
   - dist/**/*
   - out/**/*
-  - server/**/*
   - package.json
 
 # asar 鎵撳寘锛屼絾鎶婂悗绔笌渚濊禆瑙ｅ寘鍒?app.asar.unpacked锛?
 # 浠ヤ究涓昏繘绋?fork 鍑虹殑瀛愯繘绋嬭兘姝ｅ父鍔犺浇 ESM server锛坅sar 鍐呬笉鏀寔 ESM 鍔ㄦ€佸姞杞斤級
 asar: true
+# 仅把后端 bundle 单文件（及其可能携带的资源）解包到 app.asar.unpacked，运行时不依赖 node_modules
 asarUnpack:
-  - server/**/*
-  - node_modules/**/*
+  - out/server.mjs
+  - out/assets/**/*
 
 win:
   target:

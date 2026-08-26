@@ -85,7 +85,7 @@ async function startBackend() {
 	backendPort = await findFreePort(37821);
 	process.env.PORT = String(backendPort);
 	if (isDev) (0, fs.writeFileSync)((0, path.join)(appRoot, ".api-port"), String(backendPort), "utf-8");
-	const modulePath = isDev ? (0, path.join)(appRoot, "server", "index.js") : (0, path.join)(process.resourcesPath, "app.asar.unpacked", "server", "index.js");
+	const modulePath = isDev ? (0, path.join)(appRoot, "server", "index.js") : (0, path.join)(process.resourcesPath, "app.asar.unpacked", "out", "server.mjs");
 	if (!isDev) {
 		const distInAsar = (0, path.join)(process.resourcesPath, "app.asar", "dist");
 		const distLocal = (0, path.join)(appRoot, "dist");
