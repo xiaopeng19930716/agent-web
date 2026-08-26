@@ -6,100 +6,78 @@ const SRC = 'generated-images/code4/Modern_flat_app_icon_for_an_AI_2026-08-26T12
 const OUT = 'electron/build/icon.ico';
 const SIZES = [16, 24, 32, 48, 64, 128, 256];
 
-function createIconDir(count) {
-  const buf = Buffer.alloc(6);
-  buf.writeUInt16LE(0, 0);
-  buf.writeUInt16LE(1, 2);
-  buf.writeUInt16LE(count, 4);
-  return buf;
+function dibHeader(w, h) {
+  const b = Buffer.alloc(40);
+  b.writeUInt32LE(40, 0);              // biSize
+  b.writeInt32LE(w, 4);                // biWidth
+  b.writeInt32LE(h * 2, 8);            // biHeight (XOR + AND)
+  b.writeUInt16LE(1, 12);              // biPlanes
+  b.writeUInt16LE(32, 14);             // biBitCount = 32
+  b.writeUInt32LE(w * h * 4, 20);      // biSizeImage
+  return b;
 }
 
-function createIconDirEntry(width, height, size, offset) {
-  const buf = Buffer.alloc(16);
-  buf.writeUInt8(width === 256 ? 0 : width, 0);
-  buf.writeUInt8(height === 256 ? 0 : height, 1);
-  buf.writeUInt8(0, 2);
-  buf.writeUInt8(0, 3);
-  buf.writeUInt16LE(1, 4);
-  buf.writeUInt16LE(32, 6);
-  buf.writeUInt32LE(size, 8);
-  buf.writeUInt32LE(offset, 12);
-  return buf;
-}
-
-function createBitmapInfoHeader(width, height) {
-  const buf = Buffer.alloc(40);
-  buf.writeUInt32LE(40, 0);
-  buf.writeInt32LE(width, 4);
-  buf.writeInt32LE(height * 2, 8);
-  buf.writeUInt16LE(1, 12);
-  buf.writeUInt16LE(32, 14);
-  buf.writeUInt32LE(0, 16);
-  buf.writeUInt32LE(width * height * 4, 20);
-  buf.writeInt32LE(0, 24);
-  buf.writeInt32LE(0, 28);
-  buf.writeUInt32LE(0, 32);
-  buf.writeUInt32LE(0, 36);
-  return buf;
-}
-
-function createXOR(data, width, height) {
-  const rowSize = width * 4;
-  const buf = Buffer.alloc(rowSize * height);
-  for (let y = 0; y < height; y++) {
-    const srcRow = (height - 1 - y) * rowSize;
-    const dstRow = y * rowSize;
-    for (let x = 0; x < width; x++) {
-      const s = srcRow + x * 4;
-      const d = dstRow + x * 4;
-      buf[d] = data[s + 2];
-      buf[d + 1] = data[s + 1];
-      buf[d + 2] = data[s];
-      buf[d + 3] = data[s + 3];
+function xorBGRA(data, w, h) {
+  const out = Buffer.alloc(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const src = (h - 1 - y) * w * 4;   // bottom-up
+    const dst = y * w * 4;
+    for (let x = 0; x < w; x++) {
+      const s = src + x * 4, d = dst + x * 4;
+      out[d] = data[s + 2];             // B
+      out[d + 1] = data[s + 1];         // G
+      out[d + 2] = data[s];             // R
+      out[d + 3] = data[s + 3];         // A
     }
   }
-  return buf;
+  return out;
 }
 
-function createAND(width, height) {
-  const rowBytes = ((width + 31) >> 5) << 2;
-  return Buffer.alloc(rowBytes * height);
+function andMask(w, h) {
+  const rowBytes = ((w + 31) >> 5) << 2;
+  return Buffer.alloc(rowBytes * h);    // all 0 => fully opaque
 }
 
 async function main() {
-  if (!fs.existsSync(SRC)) {
-    console.error('Source icon not found:', SRC);
-    process.exit(1);
-  }
+  if (!fs.existsSync(SRC)) { console.error('Source missing:', SRC); process.exit(1); }
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
 
-  const images = [];
-  for (const size of SIZES) {
-    const { data, info } = await sharp(SRC)
-      .resize(size, size, { fit: 'cover', position: 'center' })
+  const parts = [];
+  const entries = [];
+  let offset = 6 + SIZES.length * 16;
+
+  for (const s of SIZES) {
+    const r = await sharp(SRC)
+      .resize(s, s, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .ensureAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
-    images.push({ width: info.width, height: info.height, data });
+    const w = r.info.width, h = r.info.height;
+    const img = Buffer.concat([dibHeader(w, h), xorBGRA(r.data, w, h), andMask(w, h)]);
+    entries.push({ w, h, len: img.length, offset });
+    parts.push(img);
+    offset += img.length;
   }
 
-  const dir = createIconDir(images.length);
-  const entries = [];
-  const imageBuffers = [];
-  let offset = 6 + images.length * 16;
+  const dir = Buffer.alloc(6);
+  dir.writeUInt16LE(0, 0);
+  dir.writeUInt16LE(1, 2);
+  dir.writeUInt16LE(SIZES.length, 4);
 
-  for (const img of images) {
-    const header = createBitmapInfoHeader(img.width, img.height);
-    const xor = createXOR(img.data, img.width, img.height);
-    const andMask = createAND(img.width, img.height);
-    const imageBuf = Buffer.concat([header, xor, andMask]);
-    entries.push(createIconDirEntry(img.width, img.height, imageBuf.length, offset));
-    imageBuffers.push(imageBuf);
-    offset += imageBuf.length;
-  }
+  const entryBufs = entries.map(e => {
+    const b = Buffer.alloc(16);
+    b.writeUInt8(e.w >= 256 ? 0 : e.w, 0);
+    b.writeUInt8(e.h >= 256 ? 0 : e.h, 1);
+    b.writeUInt16LE(1, 4);
+    b.writeUInt16LE(32, 6);
+    b.writeUInt32LE(e.len, 8);
+    b.writeUInt32LE(e.offset, 12);
+    return b;
+  });
 
-  fs.writeFileSync(OUT, Buffer.concat([dir, ...entries, ...imageBuffers]));
-  console.log('ICO written:', OUT, `(${images.length} sizes)`);
+  fs.writeFileSync(OUT, Buffer.concat([dir, ...entryBufs, ...parts]));
+  console.log('ICO written:', OUT, '| entries:', SIZES.length,
+    '| self-check biBitCount:', dibHeader(256, 256).readUInt16LE(14));
 }
 
-main().catch(err => { console.error(err); process.exit(1); });
+main().catch(e => { console.error(e); process.exit(1); });
