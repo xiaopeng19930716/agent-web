@@ -19,7 +19,7 @@
 
 使用 `electron-vite` + `electron-builder` 打包：
 
-- 主进程 `fork` 一个子进程拉起 `server/index.js`（复用 Electron 内置 Node，无需本机另装 Node）。
+- 主进程 `spawn` 一个子进程拉起 `server/index.js`（复用 Electron 内置 Node，无需本机另装 Node）。注意：后端入口为 ESM，必须用 `spawn(process.execPath, [serverPath])` 而非 `fork`（`fork` 不支持 ESM 入口）。
 - 生产环境下 Express 同时托管前端 `dist` 并接管路由，渲染进程直接访问 `http://localhost:<端口>`，前端代码与网页版完全一致（请求仍走相对路径 `/api`）。
 - 数据持久化目录（项目/会话）在打包后写入用户目录（`userData/code-agent-data`），避免写入只读的 asar 包。
 
@@ -72,7 +72,16 @@ npm run electron:build:mac
 
 产物输出到 `release/` 目录。
 
-`electron:dev` 模式下主进程会自动 `fork` 后端子进程；若你已手动 `npm run dev:all` 启动了后端，Electron 会复用已存在的端口（主进程会探测空闲端口，避免冲突）。
+`electron:dev` 模式下主进程会自动 `spawn` 后端子进程；若你已手动 `npm run dev:all` 启动了后端，Electron 会探测空闲端口，自动把内置后端换到 3001 之外的下一个可用端口，避免冲突。
+
+**开发模式动态端口（重要）**
+
+- 主进程在 `electron/main.js` 里用 `findFreePort(3001)` 探测后端实际端口，并把真实端口写入项目根目录的 `.api-port` 文件（运行时生成，已在 `.gitignore` 忽略）。
+- 渲染进程的 Vite 代理（`electron.vite.config.js` 的 `renderer.server.proxy`，以及网页版 `vite.config.js`）通过 http-proxy 原生 `router`，**在每个 `/api` 请求时读取 `.api-port`** 决定转发目标。这样即使 Vite 先于后端启动、或端口被换，首个请求也能命中正确后端，前端无感。
+- 配置位置：代理写在 `electron.vite.config.js` 的 `renderer.server.proxy`（Electron 渲染进程**只读取此文件**，不会读主 `vite.config.js` 的 `server` 字段）。网页版 `npm run dev` 的代理在 `vite.config.js` 的 `server.proxy`。
+- 如需临时调试端口占用：手动占住 3001 再跑 `npm run electron:dev`，日志会显示后端换到例如 3002，前端接口仍正常（代理自动跟过去）。
+
+> 控制台里出现的 `Unknown VE context` / `Autofill.enable failed` 等 `ERROR:CONSOLE` 来自 Electron 自带 Chromium DevTools 的内部噪音（来源 `devtools://devtools/bundled/...`），与应用无关，可安全忽略。
 
 ## API Key 配置（重要）
 

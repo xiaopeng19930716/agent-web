@@ -47,11 +47,12 @@ var mainWindow = null;
 async function startBackend() {
 	const dataDir = (0, path.join)(electron.app.getPath("userData"), "code-agent-data");
 	process.env.CODE_AGENT_DATA_DIR = dataDir;
-	backendPort = await findFreePort(3001);
+	backendPort = isDev ? await findFreePort(3001) : 3001;
 	process.env.PORT = String(backendPort);
+	if (isDev) (0, fs.writeFileSync)((0, path.join)(appRoot, ".api-port"), String(backendPort), "utf-8");
 	if (isDev) {
 		const modulePath = (0, path.join)(appRoot, "server", "index.js");
-		backendChild = (0, node_child_process.fork)(modulePath, [], {
+		backendChild = (0, node_child_process.spawn)(process.execPath, [modulePath], {
 			env: { ...process.env },
 			stdio: "inherit"
 		});
@@ -62,7 +63,7 @@ async function startBackend() {
 		const distLocal = (0, path.join)(appRoot, "dist");
 		process.env.SERVE_DIST = (0, fs.existsSync)(distInAsar) ? distInAsar : distLocal;
 		const modulePath = (0, path.join)(unpackedRoot, "server", "index.js");
-		backendChild = (0, node_child_process.fork)(modulePath, [], {
+		backendChild = (0, node_child_process.spawn)(process.execPath, [modulePath], {
 			env: { ...process.env },
 			stdio: "inherit"
 		});
@@ -81,11 +82,7 @@ function createWindow() {
 			contextIsolation: true,
 			nodeIntegration: false
 		},
-		titleBarStyle: "hidden",
-		titleBarOverlay: {
-			color: "#1f1f1f",
-			symbolColor: "#ffffff"
-		}
+		frame: false
 	});
 	if (isDev) {
 		mainWindow.loadURL(DEV_URL);
@@ -98,6 +95,13 @@ function createWindow() {
 	});
 }
 electron.app.whenReady().then(async () => {
+	electron.ipcMain.on("window:minimize", () => mainWindow?.minimize());
+	electron.ipcMain.on("window:maximize", () => {
+		if (!mainWindow) return;
+		if (mainWindow.isMaximized()) mainWindow.unmaximize();
+		else mainWindow.maximize();
+	});
+	electron.ipcMain.on("window:close", () => mainWindow?.close());
 	try {
 		await startBackend();
 	} catch (e) {
