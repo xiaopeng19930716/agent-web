@@ -27,12 +27,12 @@ export async function uploadImage(dataUrl, name = '', type = '') {
   return json.url
 }
 
-// 手动终端：调用本机 PowerShell/sh 执行一次性命令
-export async function runCommand({ command, cwd, projectId, permission, timeout }) {
+// 手动终端：调用本机指定 shell 执行一次性命令
+export async function runCommand({ command, cwd, projectId, permission, timeout, shell }) {
   const resp = await fetch('/api/run-command', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command, cwd, projectId, permission, timeout }),
+    body: JSON.stringify({ command, cwd, projectId, permission, timeout, shell }),
   })
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}))

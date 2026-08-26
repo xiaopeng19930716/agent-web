@@ -110,11 +110,12 @@ function resolveProjectRoot(projectId) {
   return os.homedir()
 }
 
-// 手动终端：执行一次性命令（Windows 走 PowerShell，其它走 sh）
-// body: { command, cwd?, projectId?, permission, timeout? }
+// 手动终端：执行一次性命令
+// body: { command, cwd?, projectId?, permission, timeout?, shell? }
+// shell: 'powershell'(默认,Win) | 'cmd'(Win) | 'sh'(mac/linux)
 router.post('/run-command', (req, res) => {
   try {
-    const { command, cwd, projectId, permission, timeout } = req.body || {}
+    const { command, cwd, projectId, permission, timeout, shell: shellName } = req.body || {}
     if (!command || typeof command !== 'string') {
       return res.status(400).json({ error: '缺少 command' })
     }
@@ -129,8 +130,18 @@ router.post('/run-command', (req, res) => {
     const timeoutMs = Math.min(Number(timeout) > 0 ? Number(timeout) : 300, 3600) * 1000
 
     const isWin = process.platform === 'win32'
-    const shell = isWin ? 'powershell.exe' : 'sh'
-    const shellArgs = isWin ? ['-NoProfile', '-Command', command] : ['-c', command]
+    let shell, shellArgs
+    if (shellName === 'cmd' && isWin) {
+      shell = 'cmd.exe'
+      shellArgs = ['/c', command]
+    } else if (shellName === 'sh' && !isWin) {
+      shell = 'sh'
+      shellArgs = ['-c', command]
+    } else {
+      // 默认：Windows 走 PowerShell，其它走 sh
+      shell = isWin ? 'powershell.exe' : 'sh'
+      shellArgs = isWin ? ['-NoProfile', '-Command', command] : ['-c', command]
+    }
 
     const proc = spawn(shell, shellArgs, { cwd: workdir, windowsHide: true })
     let stdout = '', stderr = ''
